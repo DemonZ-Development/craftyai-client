@@ -1,0 +1,196 @@
+name: CraftyAI - Forge Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-forge*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Legacy Forge Mod Build (MC 1.20.4) ───────────────────────
+  build-legacy-forge:
+    name: Build Legacy Forge (MC 1.20.4)
+    runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -Xmx2G
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17 (Legacy Forge 1.20.4)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle (legacy mods)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Forge Mod (1.20.4)
+        run: gradle :craftyai-forge:build --no-daemon -Ptarget=forge-only
+
+      - name: Gather Legacy Forge Artifacts
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p forge-artifacts
+          find craftyai-forge/build/libs/ -name "craftyai-forge-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} forge-artifacts/ \; || true
+
+      - name: Upload Legacy Forge Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-forge-artifacts
+          path: forge-artifacts/*
+
+  # ── Forge Mod Build (MC 1.20.6) ───────────────────────────────
+  build-forge-1206:
+    name: Build Forge (MC 1.20.6)
+    runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -Xmx2G
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 21 (Forge 1.20.6)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle (Forge 1.20.6)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Forge Mod (1.20.6)
+        run: gradle :craftyai-forge-1206:build --no-daemon -Ptarget=forge1206
+
+      - name: Gather Forge 1.20.6 Artifacts
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p forge1206-artifacts
+          find craftyai-forge-1206/build/libs/ -name "craftyai-forge-1206-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} forge1206-artifacts/ \; || true
+
+      - name: Upload Forge 1.20.6 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-1206-artifacts
+          path: forge1206-artifacts/*
+
+  # ── Modern NeoForge Mod Build (MC 26.x) ────────────────────────
+  build-neoforge-26:
+    name: Build NeoForge 26 (MC 26.x)
+    needs: build-legacy-forge
+    runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -Xmx2G
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 25 (Modern NeoForge 26)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Setup Gradle (MC 26.x)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Build NeoForge Mod (MC 26.x)
+        run: gradle :craftyai-forge-26:build --no-daemon -Ptarget=forge26
+
+      - name: Gather NeoForge 26 Artifacts
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p neoforge26-artifacts
+          [ -d craftyai-forge-26/build/libs ] && find craftyai-forge-26/build/libs/ -name "craftyai-forge-26-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} neoforge26-artifacts/ \; || true
+
+      - name: Upload NeoForge 26 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: neoforge-26-artifacts
+          path: neoforge26-artifacts/*
+
+  # ── Publish Forge Release ───────────────────────────────────────
+  publish-forge-release:
+    name: Publish Forge Release
+    needs: [build-legacy-forge, build-forge-1206, build-neoforge-26]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract Changelog for Release
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION%%-*}"
+          echo "Extracting changelog for version $VERSION..."
+          CHANGELOG_SECTION=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit;
+              if (index($0, "[" ver "]") > 0) { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          if [ -z "$CHANGELOG_SECTION" ]; then
+            CHANGELOG_SECTION="*No changelog entry found for this version.*"
+          fi
+
+          {
+            printf '# CraftyAI %s — Forge & NeoForge Release\n\n' "${{ github.ref_name }}"
+            printf 'CraftyAI brings an intelligent, context-aware AI assistant directly into your Minecraft Forge and NeoForge server.\n\n'
+            printf '%s\n\n' '---'
+            printf '## What'\''s Changed\n\n'
+            printf '%s\n\n' "$CHANGELOG_SECTION"
+            printf '%s\n\n' '---'
+            printf '## Download & Installation\n\n'
+            printf '| File | Platform |\n'
+            printf '|------|----------|\n'
+            printf '| `craftyai-forge-*.jar` | Forge (Minecraft 1.20.4) — drop into `mods/` |\n'
+            printf '| `craftyai-forge-1206-*.jar` | Forge (Minecraft 1.20.6) — drop into `mods/` |\n'
+            printf '| `craftyai-forge-26-*.jar` | NeoForge (Minecraft 26.x) — drop into `mods/` |\n\n'
+            printf '%s\n\n' '---'
+            printf '## Getting Started\n\n'
+            printf '1. Drop the appropriate Forge / NeoForge jar into `mods/`.\n'
+            printf '2. Restart your server.\n'
+            printf '3. Press **M** in-game or use `/crafty settings` to open settings and click "Auto-Mint Free Key".\n'
+            printf '4. Chat with the AI by typing `@crafty <question>` in chat.\n\n'
+            printf 'Need help? Visit https://craftyai.pages.dev or join our Discord: https://discord.gg/zCkE44hsBR\n'
+          } > release-notes.md
+
+      - name: Download Forge Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2.4.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CraftyAI ${{ github.ref_name }}
+          prerelease: false
+          draft: false
+          body_path: release-notes.md
+          files: |
+            release-artifacts/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,26 @@
+# Build outputs
+build/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+out/
+run/
+
+# Gradle
+.gradle/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

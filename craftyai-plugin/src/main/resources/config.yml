@@ -1,0 +1,128 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  CraftyAI V1.0 Configuration — DemonZ Development         ║
+# ║  Official Wiki & Guides: https://craftyai.pages.dev          ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+# --- SERVER CONNECTION ---
+server:
+  # Server ID is now stored in .craftyai_session (auto-generated, no manual config needed).
+
+  # Your API key (cai_ token generated via Discord bot /panel)
+  secret: "YOUR_API_KEY_HERE"
+
+  # Custom AI Provider (bypasses CraftyAI Gateway entirely)
+  # When enabled, requests go directly to your own AI endpoint
+  custom_provider:
+    enabled: false
+    url: ""
+    api_key: ""
+    model: ""
+
+# --- AI PERSONALITY ---
+ai:
+  # The AI's display name (shown in chat)
+  name: "Crafty"
+
+  # Alternative names that also activate the AI
+  # Players can use any of these to talk to the AI
+  aliases:
+    - "crafty"
+    - "ai"
+    - "helper"
+    - "craftyai"
+
+  # Chat activation settings
+  activation:
+    # Character prefix (e.g., "@" makes it @crafty)
+    prefix: "@"
+
+    # If true, players MUST use the prefix (e.g., "@crafty help")
+    # If false, just "crafty help" also works
+    require-prefix: false
+
+    # Response visibility routing:
+    # - "default": Prefix activations (e.g. @crafty) are private, non-prefixed (e.g. crafty) are public.
+    # - "always-private": All chat responses are sent privately to the player who asked.
+    # - "always-public": All chat responses are broadcast publicly to the server.
+    response-visibility: "default"
+
+    # If true, "CRAFTY" and "crafty" are different
+    case-sensitive: false
+
+    # If true, "hey crafty what is this" works (name anywhere)
+    # If false, name must be at the START of the message
+    anywhere-in-message: false
+
+    # Typo tolerance — "crsafty", "craftu", "crfaty" still trigger
+    fuzzy-match: true
+
+    # Maximum character edits for fuzzy matching (1-3 recommended)
+    fuzzy-threshold: 2
+
+    # Seconds between AI activations per player
+    cooldown: 3
+
+  # If true, the AI can execute in-game actions (time, weather, teleport, etc.)
+  # Requires crafty.actions permission for the player.
+  enable_actions: true
+
+  # If true, AI always uses the local knowledge base (no cloud requests)
+  force-local-mode: false
+
+  # Maximum amount of items the AI can give per action (default: 64)
+  max_give_amount: 64
+
+  # Agentic Tasks (actions like time, weather, give, etc.)
+  agentic_tasks_enabled: true
+
+  # If false, destructive actions (gamemode, kill mobs, CHAT commands) execute
+  # immediately without requiring /crafty confirm. Default: true (safe mode).
+  require_confirmation: true
+
+# --- CHAT DISPLAY ---
+chat:
+  # Chat format — {name} = AI name, {response} = AI answer
+  format: "&b[{name}] &7➦ &f{response}"
+
+  # Sounds (Bukkit Sound enum names)
+  sounds:
+    thinking: "BLOCK_NOTE_BLOCK_CHIME"
+    success: "ENTITY_EXPERIENCE_ORB_PICKUP"
+    error: "BLOCK_NOTE_BLOCK_CHIME"
+
+# --- VISION SCANNER ---
+vision:
+  # Cooldown in seconds between scans
+  cooldown: 5
+  # Activation method: "item_right_click" (hold item + right-click) or "command_only"
+  # "item_right_click" uses the activation_item below — does NOT conflict with shift+place
+  activation: "item_right_click"
+  # Item to hold while right-clicking to scan (default: COMPASS)
+  activation_item: "COMPASS"
+  # Legacy shift+right-click scanning (causes conflicts with block placing while sneaking)
+  shift_scan_enabled: false
+
+# --- OPERATOR WELCOME ---
+# Show a branded welcome message to OPs/admins when they join
+# Set to false to disable
+op_welcome_message: true
+
+# --- METRICS & TELEMETRY ---
+# Help us improve CraftyAI by sending anonymous usage statistics.
+# This includes server version, player count, and AI request frequency.
+# Set to false to disable all heartbeats and status reporting.
+enable_metrics: true
+
+# --- ANNOUNCEMENTS ---
+# This endpoint is served as a cached static asset, so checks do not consume
+# the CraftyAI Worker request allowance. The minimum interval is five minutes.
+announcements:
+  enabled: true
+  poll_interval_seconds: 300
+
+# Applied Control Plane revision. Managed automatically by CraftyAI.
+control:
+  revision: 0
+
+# Do NOT modify this value. Used for config updates and migrations.
+config_version: 4

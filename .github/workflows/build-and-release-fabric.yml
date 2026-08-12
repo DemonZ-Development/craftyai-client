@@ -1,0 +1,135 @@
+name: CraftyAI - Fabric Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-fabric*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Fabric Mods Build (Legacy 1.20-1.21.x & Modern MC 26.x) ─────
+  build-fabric:
+    name: Build Fabric Mods (Legacy & Modern)
+    runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -Xmx2G
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17 (Legacy Fabric)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle (legacy mods)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Fabric Mod (1.20 - 1.21.x)
+        run: gradle :craftyai-fabric:build --no-daemon -Ptarget=legacy
+
+      - name: Setup JDK 25 (Modern Fabric 26)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'oracle'
+
+      - name: Setup Gradle (MC 26.x)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Build Fabric Mod (MC 26.x)
+        run: gradle :craftyai-fabric-26:build --no-daemon -Ptarget=modern
+
+      - name: Gather Fabric Artifacts
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p fabric-artifacts
+          find craftyai-fabric/build/libs/ -name "craftyai-fabric-*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" -exec cp {} fabric-artifacts/ \; || true
+          [ -d craftyai-fabric-26/build/libs ] && find craftyai-fabric-26/build/libs/ -name "craftyai-*.jar" ! -name "*sources*.jar" ! -name "*dev*.jar" -exec cp {} fabric-artifacts/ \; || true
+
+      - name: Upload Fabric Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fabric-artifacts
+          path: fabric-artifacts/*
+
+  # ── Publish Fabric Release ──────────────────────────────────────
+  publish-fabric-release:
+    name: Publish Fabric Release
+    needs: build-fabric
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract Changelog for Release
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION%%-*}"
+          echo "Extracting changelog for version $VERSION..."
+          CHANGELOG_SECTION=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit;
+              if (index($0, "[" ver "]") > 0) { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          if [ -z "$CHANGELOG_SECTION" ]; then
+            CHANGELOG_SECTION="*No changelog entry found for this version.*"
+          fi
+
+          {
+            printf '# CraftyAI %s — Fabric Mod Release\n\n' "${{ github.ref_name }}"
+            printf 'CraftyAI brings an intelligent, context-aware AI assistant directly into your Minecraft Fabric server.\n\n'
+            printf '%s\n\n' '---'
+            printf '## What'\''s Changed\n\n'
+            printf '%s\n\n' "$CHANGELOG_SECTION"
+            printf '%s\n\n' '---'
+            printf '## Download & Installation\n\n'
+            printf '| File | Platform |\n'
+            printf '|------|----------|\n'
+            printf '| `craftyai-fabric-*.jar` | Fabric (Minecraft 1.20 — 1.21.x) — drop into your `mods/` folder |\n'
+            printf '| `craftyai-fabric-26-*.jar` | Fabric (Minecraft 26.x) — drop into your `mods/` folder |\n\n'
+            printf '%s\n\n' '---'
+            printf '## Getting Started\n\n'
+            printf '1. Drop the appropriate Fabric jar into `mods/`.\n'
+            printf '2. Restart your server.\n'
+            printf '3. Press **M** in-game or use `/crafty settings` to open settings and click "Auto-Mint Free Key".\n'
+            printf '4. Chat with the AI by typing `@crafty <question>` in chat.\n\n'
+            printf 'Need help? Visit https://craftyai.pages.dev or join our Discord: https://discord.gg/zCkE44hsBR\n'
+          } > release-notes.md
+
+      - name: Download Fabric Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2.4.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CraftyAI ${{ github.ref_name }}
+          prerelease: false
+          draft: false
+          body_path: release-notes.md
+          files: |
+            release-artifacts/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

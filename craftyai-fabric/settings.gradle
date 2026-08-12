@@ -1,0 +1,15 @@
+pluginManagement {
+    repositories {
+        maven {
+            name = 'Fabric'
+            url = 'https://maven.fabricmc.net/'
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'craftyai-fabric'
+
+include 'craftyai-common'
+project(':craftyai-common').projectDir = file('../craftyai-common')

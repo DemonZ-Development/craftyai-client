@@ -1,0 +1,15 @@
+pluginManagement {
+    repositories {
+        maven {
+            name = 'NeoForge'
+            url = 'https://maven.neoforged.net/releases/'
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'craftyai-mod-forge-26'
+
+include 'craftyai-common'
+project(':craftyai-common').projectDir = file('../craftyai-common')

@@ -1,0 +1,297 @@
+[
+  {
+    "question": "how do I make a crafting table",
+    "answer": "Place 4 wooden planks in a 2x2 grid in your inventory crafting area. You can use any type of wood planks. The crafting table allows access to a 3x3 crafting grid for more complex recipes.",
+    "keywords": ["crafting", "table", "workbench", "planks", "wood", "recipe"]
+  },
+  {
+    "question": "how do I find diamonds",
+    "answer": "Mine at Y levels -64 to -11 (best at Y -59 in 1.20+). Use an iron pickaxe or better. Strip mining at these levels is the most efficient method. Look for diamond ore blocks exposed in cave walls or mine in a pattern to expose more blocks.",
+    "keywords": ["diamonds", "mining", "y level", "iron", "pickaxe", "strip", "mine", "dig", "ore"]
+  },
+  {
+    "question": "how do I enchant items",
+    "answer": "Build an enchanting table with 4 obsidian, 2 diamonds, and 1 book. Surround it with bookshelves (max 15) for better enchantments. You'll also need lapis lazuli and XP levels. An anvil can combine enchantments or rename items.",
+    "keywords": ["enchant", "enchanting", "table", "bookshelves", "lapis", "experience", "xp", "anvil", "combine"]
+  },
+  {
+    "question": "what are the best armor enchantments",
+    "answer": "Protection IV is the best general enchantment. For specific use: Fire Protection IV for the Nether, Blast Protection IV for creepers/TNT. Feather Falling IV on boots is essential. Unbreaking III and Mending on all pieces. Thorns can damage attackers but damages armor faster.",
+    "keywords": ["armor", "enchantments", "protection", "unbreaking", "mending", "feather", "falling", "blast", "fire", "thorns"]
+  },
+  {
+    "question": "how do I make a nether portal",
+    "answer": "Build a frame of obsidian blocks at least 4x5 (minimum 10 obsidian). Light the inside with flint and steel. You can make obsidian by pouring water on lava source blocks. Portals can be any size as long as corners are obsidian.",
+    "keywords": ["nether", "portal", "obsidian", "flint", "steel", "lava", "water", "dimension"]
+  },
+  {
+    "question": "how do I make a beacon",
+    "answer": "Craft a beacon with 3 obsidian, 5 glass, and 1 nether star. Place it on a pyramid of mineral blocks. Activate by placing an iron, gold, diamond, emerald, or netherite ingot on the beacon. The pyramid size determines the beacon's range and available powers.",
+    "keywords": ["beacon", "nether", "star", "pyramid", "mineral", "blocks", "iron", "gold", "diamond", "emerald", "netherite", "powers"]
+  },
+  {
+    "question": "how do I breed animals",
+    "answer": "Feed two adult animals of the same species their specific breeding food (wheat for cows/sheep, carrots/potatoes for pigs, seeds for chickens). Hearts appear, they breed a baby, and have a cooldown. Baby animals take 20 minutes to grow up.",
+    "keywords": ["breed", "animals", "cows", "sheep", "pigs", "chickens", "wheat", "carrots", "potatoes", "seeds", "baby", "grow"]
+  },
+  {
+    "question": "how do I make a farm",
+    "answer": "Till dirt with a hoe to create farmland. Plant seeds (wheat, carrots, potatoes, beetroot, etc.). Ensure water is within 4 blocks to keep farmland hydrated. Use bone meal to accelerate growth. Build fences to protect crops from trampling.",
+    "keywords": ["farm", "crops", "wheat", "carrots", "potatoes", "beetroot", "hoe", "farmland", "water", "bone", "meal", "fence"]
+  },
+  {
+    "question": "how do I make potions",
+    "answer": "Craft a brewing stand with 1 blaze rod and 3 cobblestone. Place it over a heat source (fire, magma block). Use blaze powder as fuel. Combine water bottles with nether wart to make awkward potions, then add ingredients for effects. Redstone extends duration, glowstone enhances level.",
+    "keywords": ["potions", "brewing", "stand", "blaze", "rod", "nether", "wart", "awkward", "redstone", "glowstone", "effects", "splash", "lingering"]
+  },
+  {
+    "question": "what are the most useful potions",
+    "answer": "Strength II, Speed II, Regeneration, Fire Resistance, and Night Vision are most useful for combat and exploration. Invisibility for stealth. Water Breathing for underwater. Poison and Weakness for PvP. Golden apples provide regeneration and absorption.",
+    "keywords": ["potions", "strength", "speed", "regeneration", "fire", "resistance", "night", "vision", "invisibility", "water", "breathing", "poison", "weakness", "golden", "apple"]
+  },
+  {
+    "question": "how do I trade with villagers",
+    "answer": "Right-click villagers to open trading interface. They offer trades based on their profession. Trades refresh when you complete them or by using a lectern on a job site block. Cure zombie villagers with a splash potion of weakness and golden apple.",
+    "keywords": ["villagers", "trade", "profession", "lectern", "job", "site", "zombie", "cure", "golden", "apple", "weakness", "emeralds"]
+  },
+  {
+    "question": "what are the best villager trades",
+    "answer": "Librarians for Mending books, enchantments, and name tags. Farmers for cheap food (carrots, potatoes, bread). Clerics for redstone, lapis, and ender pearls. Armorers for diamond armor. Tool smiths for diamond tools. Weaponsmiths for diamond weapons.",
+    "keywords": ["villagers", "trades", "librarian", "mending", "enchantments", "farmer", "food", "cleric", "redstone", "lapis", "ender", "pearl", "armorer", "toolsmith", "weaponsmith", "emeralds"]
+  },
+  {
+    "question": "how do I make redstone contraptions",
+    "answer": "Redstone wire carries power 15 blocks. Use repeaters to extend signal and add delay. Use comparators to compare signal strength or read container contents. Pistons push blocks. Observers detect block updates. Torches invert signals.",
+    "keywords": ["redstone", "wire", "repeater", "comparator", "piston", "observer", "torch", "signal", "power", "circuit", "contraption", "mechanism"]
+  },
+  {
+    "question": "how do I make an automatic farm",
+    "answer": "Use water channels to collect crops. Use pistons to harvest when crops are fully grown. Use observers to detect growth and trigger harvest. Use hoppers to collect items into chests. Use minecarts with hoppers for large-scale collection.",
+    "keywords": ["automatic", "farm", "water", "channel", "piston", "harvest", "observer", "hopper", "chest", "minecart", "collection", "redstone"]
+  },
+  {
+    "question": "how do I find the End",
+    "answer": "Throw eyes of ender to locate strongholds. Follow the direction they fly. Dig down when they go down. In the stronghold, find the portal room. Fill the portal frame with eyes of ender (12 needed). Jump in to reach the End.",
+    "keywords": ["end", "dimension", "ender", "eyes", "stronghold", "portal", "frame", "dragon", "elytra", "shulkers"]
+  },
+  {
+    "question": "how do I defeat the Ender Dragon",
+    "answer": "Destroy end crystals on obsidian pillars to prevent dragon healing. Shoot the dragon with a bow when it perches. Attack with a sword when close. Bring blocks to build up to crystals. Use beds to damage dragon in the End (careful with explosion radius).",
+    "keywords": ["ender", "dragon", "defeat", "crystals", "bow", "sword", "obsidian", "pillars", "beds", "explosion", "healing", "perch"]
+  },
+  {
+    "question": "how do I get elytra",
+    "answer": "Find End ships floating in the outer End islands. Look for the ship with purple banners. Inside, you'll find elytra in an item frame. Use fireworks while flying to boost speed. Repair with phantom membranes in an anvil.",
+    "keywords": ["elytra", "end", "ship", "flying", "fireworks", "phantom", "membranes", "repair", "anvil", "glide", "boost"]
+  },
+  {
+    "question": "how do I make netherite",
+    "answer": "Mine ancient debris in the Nether at Y 15 or lower. Smelt it into netherite scrap. Combine 4 scraps with 4 gold ingots in a crafting table to make netherite ingot. Use a smithing table to upgrade diamond gear to netherite (netherite gear doesn't burn in lava).",
+    "keywords": ["netherite", "ancient", "debris", "nether", "gold", "ingot", "smithing", "table", "upgrade", "diamond", "lava", "fire", "resistant"]
+  },
+  {
+    "question": "how do I find the Nether fortress",
+    "answer": "Travel along the X or Z axis in the Nether. Fortresses generate in strips along these axes. Look for bridges and nether brick structures. Bring potions of fire resistance and gold armor for piglins. Use blaze rods for brewing stands.",
+    "keywords": ["nether", "fortress", "blaze", "rod", "wither", "skeleton", "nether", "brick", "bridge", "piglin", "gold", "armor"]
+  },
+  {
+    "question": "how do I summon the Wither",
+    "answer": "Place 3 wither skeleton skulls in a T shape on top of 4 soul sand or soul soil blocks. The wither spawns and explodes. Fight in an open area or underground to limit destruction. Use diamond or netherite armor with Protection. Collect nether stars for beacons.",
+    "keywords": ["wither", "boss", "skeleton", "skulls", "soul", "sand", "soil", "summon", "nether", "star", "beacon", "explosion"]
+  },
+  {
+    "question": "how do I make a shield",
+    "answer": "Craft a shield with 1 iron ingot and 6 wooden planks in a Y shape. Shields block attacks when right-clicking. Can be enchanted with Unbreaking and Mending. Customize with banners in a crafting table. Shields have durability and can break.",
+    "keywords": ["shield", "craft", "iron", "ingot", "planks", "block", "enchant", "banner", "customize", "durability", "defense"]
+  },
+  {
+    "question": "how do I make a crossbow",
+    "answer": "Craft a crossbow with 3 sticks, 2 string, 1 iron ingot, and 1 tripwire hook. Crossbows shoot arrows with more power than bows but take longer to load. Can shoot firework rockets. Enchant with Multishot, Quick Charge, Piercing, and Unbreaking.",
+    "keywords": ["crossbow", "craft", "sticks", "string", "iron", "ingot", "tripwire", "hook", "arrows", "firework", "multishot", "quick", "charge", "piercing", "enchant"]
+  },
+  {
+    "question": "how do I make a trident",
+    "answer": "Tridents are obtained from drowned mobs. They can be thrown or used as a melee weapon. Enchant with Loyalty (returns to you), Riptide (launches you when wet), Channeling (summons lightning during storms), Impaling (extra damage to aquatic mobs), and Unbreaking.",
+    "keywords": ["trident", "drowned", "throw", "melee", "loyalty", "riptide", "channeling", "impaling", "lightning", "aquatic", "enchant", "repair"]
+  },
+  {
+    "question": "how do I make concrete",
+    "answer": "Craft concrete powder with 4 sand, 4 gravel, and 1 dye of any color. Place the powder and pour water on it to turn it into solid concrete. Concrete comes in 16 colors. It's not affected by gravity when hardened.",
+    "keywords": ["concrete", "powder", "sand", "gravel", "dye", "water", "color", "building", "blocks", "gravity"]
+  },
+  {
+    "question": "how do I make terracotta and glazed terracotta",
+    "answer": "Smelt clay blocks to make terracotta. Dye terracotta with any of 16 colors in a crafting table. Smelt dyed terracotta to make glazed terracotta with unique patterns. Glazed terracotta connects to other blocks based on placement direction.",
+    "keywords": ["terracotta", "clay", "smelt", "dye", "glazed", "patterns", "colors", "building", "decorative"]
+  },
+  {
+    "question": "how do I find copper",
+    "answer": "Copper ore generates in the Overworld at Y 0 to 96 (most common at Y 48). Mine with a stone pickaxe or better. Raw copper can be smelted into copper ingots. Copper oxidizes over time (orange to green). Use a honeycomb to wax and prevent oxidation.",
+    "keywords": ["copper", "ore", "mining", "smelt", "ingot", "oxidize", "wax", "honeycomb", "lightning", "rod", "spyglass", "brush"]
+  },
+  {
+    "question": "what can I make with copper",
+    "answer": "Craft lightning rods (divert lightning), spyglasses (zoom in), brushes (archaeology), copper blocks (oxidize over time), cut copper, stairs, slabs, grates, and doors. Copper can also be used to craft telescopes and lightning protection systems.",
+    "keywords": ["copper", "lightning", "rod", "spyglass", "brush", "archaeology", "blocks", "stairs", "slabs", "grates", "doors", "craft"]
+  },
+  {
+    "question": "how do I use amethyst",
+    "answer": "Find amethyst geodes in underground caves. Mine amethyst clusters with a silk touch pickaxe to get buds, or mine with any pickaxe for amethyst shards. Craft tinted glass (sheds light but can't be seen through), spyglasses (zoom in), and calibration for sculk sensors.",
+    "keywords": ["amethyst", "geode", "shards", "clusters", "tinted", "glass", "spyglass", "sculk", "sensor", "cave", "mining"]
+  },
+  {
+    "question": "how do I use sculk sensors",
+    "answer": "Sculk sensors detect vibrations nearby and send redstone signals. Use wool to dampen vibrations and prevent detection. Sculk shriekers can summon the Warden if triggered enough times. Sculk catalysts spread sculk when mobs die nearby.",
+    "keywords": ["sculk", "sensor", "vibrations", "redstone", "wool", "shrieker", "warden", "catalyst", "deep", "dark", "biome"]
+  },
+  {
+    "question": "how do I avoid the Warden",
+    "answer": "The Warden is blind but detects vibrations and smells. Sneak to reduce vibrations. Use wool to block detection. Throw snowballs or arrows to distract. Shoot from a distance. Use snowballs to create safe paths. The Warden despairs after 60 seconds of inactivity.",
+    "keywords": ["warden", "sculk", "shrieker", "sneak", "vibrations", "wool", "distract", "snowball", "arrow", "deep", "dark", "blind", "smell"]
+  },
+  {
+    "question": "how do I make a compass",
+    "answer": "Craft a compass with 4 iron ingots and 1 redstone dust in a T shape. The compass points to the world spawn. Use a compass on a lodestone to create a lodestone compass that points to that lodestone. Compasses work in the Nether and End when linked to lodestones.",
+    "keywords": ["compass", "iron", "ingot", "redstone", "lodestone", "spawn", "navigation", "nether", "end", "point"]
+  },
+  {
+    "question": "how do I make a clock",
+    "answer": "Craft a clock with 1 gold ingot in the center and 4 gold ingots around it in a plus shape. The clock shows the sun/moon position to indicate time. Useful for tracking day/night cycles underground.",
+    "keywords": ["clock", "gold", "ingot", "time", "sun", "moon", "day", "night", "underground"]
+  },
+  {
+    "question": "how do I make a map",
+    "answer": "Craft an empty map with 8 paper and 1 compass in a crafting table. Right-click to activate and draw the surrounding area. Maps can be zoomed out by surrounding them with paper in a crafting table (up to 4 zoom levels). Use a cartography table for more options.",
+    "keywords": ["map", "paper", "compass", "cartography", "table", "zoom", "explore", "navigation", "draw", "area"]
+  },
+  {
+    "question": "how do I make a book and quill",
+    "answer": "Craft a book and quill with 1 book, 1 ink sac, and 1 feather. Right-click to write in it. You can write up to 50 pages. Sign the book to make it a written book that can be copied. Use for in-game documentation or stories.",
+    "keywords": ["book", "quill", "ink", "sac", "feather", "write", "sign", "copy", "written", "documentation"]
+  },
+  {
+    "question": "how do I make an enchanting table",
+    "answer": "Craft an enchanting table with 2 diamonds, 4 obsidian, and 1 book in a crafting table. Place it and surround with bookshelves (max 15) for level 30 enchants. Bookshelves must be 1 block away with air between them and the table.",
+    "keywords": ["enchanting", "table", "diamonds", "obsidian", "book", "bookshelves", "level", "30", "setup"]
+  },
+  {
+    "question": "how do I make an anvil",
+    "answer": "Craft an anvil with 3 iron blocks and 4 iron ingots in a T shape. Use an anvil to combine enchantments, rename items, and repair gear. Each use costs XP levels. Anvils can break after too many uses (25% chance each use).",
+    "keywords": ["anvil", "iron", "block", "ingot", "combine", "enchantments", "rename", "repair", "xp", "levels", "break"]
+  },
+  {
+    "question": "how do I make a smithing table",
+    "answer": "Craft a smithing table with 2 iron ingots and 4 planks in a crafting table. Use it to upgrade diamond gear to netherite (requires netherite ingot). Also used to trim armor with armor trims for customization.",
+    "keywords": ["smithing", "table", "iron", "ingot", "planks", "netherite", "upgrade", "diamond", "armor", "trims", "customize"]
+  },
+  {
+    "question": "how do I make a grindstone",
+    "answer": "Craft a grindstone with 2 sticks, 1 stone slab, and 2 planks in a T shape. Use it to remove enchantments (gives some XP back) and repair items without losing enchantments. Also used as a job site block for weaponsmiths.",
+    "keywords": ["grindstone", "stick", "stone", "slab", "planks", "disenchant", "repair", "xp", "weaponsmith", "job"]
+  },
+  {
+    "question": "how do I make a fletching table",
+    "answer": "Craft a fletching table with 2 flint and 4 planks in a crafting table. Used as a job site block for fletchers (villagers who sell arrows, bows, crossbows, and flint). Players cannot currently use it to craft items.",
+    "keywords": ["fletching", "table", "flint", "planks", "fletcher", "villager", "job", "site", "arrows", "bows", "crossbows"]
+  },
+  {
+    "question": "how do I make a loom",
+    "answer": "Craft a loom with 2 string and 2 planks in a crafting table. Use it to apply banners and patterns to banners. Create banner patterns with paper and items (creeper head, wither rose, etc.). Also a job site block for shepherds.",
+    "keywords": ["loom", "string", "planks", "banner", "patterns", "shepherd", "villager", "job", "site", "decorative"]
+  },
+  {
+    "question": "how do I make a cartography table",
+    "answer": "Craft a cartography table with 2 paper and 4 planks in a crafting table. Use it to zoom out maps, clone maps, and lock maps. Also a job site block for cartographers who sell maps and banners.",
+    "keywords": ["cartography", "table", "paper", "planks", "map", "zoom", "clone", "lock", "cartographer", "villager", "job"]
+  },
+  {
+    "question": "how do I make a composter",
+    "answer": "Craft a composter with 7 slabs in a U shape in a crafting table. Add plant-based items (crops, seeds, saplings, etc.) to create bone meal. Different items have different compost levels. Full composter yields bone meal. Job site for farmers.",
+    "keywords": ["composter", "slabs", "bone", "meal", "crops", "seeds", "saplings", "compost", "farmer", "villager", "job"]
+  },
+  {
+    "question": "how do I make a smoker",
+    "answer": "Craft a smoker with 1 furnace and 4 logs in a crafting table. Smokers cook food twice as fast as regular furnaces. Only accepts food items. Can be automated with hoppers. Job site for butchers.",
+    "keywords": ["smoker", "furnace", "logs", "food", "cook", "fast", "hopper", "butcher", "villager", "job"]
+  },
+  {
+    "question": "how do I make a blast furnace",
+    "answer": "Craft a blast furnace with 1 furnace, 3 smooth stone, and 1 iron ingot in a crafting table. Blast furnaces smelt ores and metal items twice as fast as regular furnaces. Only accepts smeltable items. Can be automated with hoppers. Job site for armorers.",
+    "keywords": ["blast", "furnace", "smooth", "stone", "iron", "ingot", "smelt", "fast", "hopper", "armorer", "villager", "job"]
+  },
+  {
+    "question": "how do I make a barrel",
+    "answer": "Craft a barrel with 6 planks and 2 wooden slabs in a crafting table. Barrels function like chests but can be placed sideways and opened from the side. Useful for compact storage. Job site for fishermen.",
+    "keywords": ["barrel", "planks", "slabs", "chest", "storage", "compact", "fisherman", "villager", "job"]
+  },
+  {
+    "question": "how do I make a lectern",
+    "answer": "Craft a lectern with 4 slabs and 1 bookshelf in a crafting table. Place a book and quill or written book on it to display. Used by librarians to refresh trades. Right-click to read the book. Can hold 1 book.",
+    "keywords": ["lectern", "slabs", "bookshelf", "book", "quill", "written", "librarian", "villager", "job", "read"]
+  },
+  {
+    "question": "how do I make a stonecutter",
+    "answer": "Craft a stonecutter with 1 stone and 3 iron ingots in an L shape. Used to cut stone and copper into various shapes (stairs, slabs, chiseled versions) more efficiently than crafting tables. Doesn't require XP. Job site for stonemasons.",
+    "keywords": ["stonecutter", "stone", "iron", "ingot", "cut", "stairs", "slabs", "chiseled", "efficient", "stonemason", "villager", "job"]
+  },
+  {
+    "question": "how do I make a cauldron",
+    "answer": "Craft a cauldron with 7 iron ingots in a U shape. Cauldrons can hold water, lava, and powder snow. Used to fill bottles, dye leather armor, and hold potions. Dripstone can slowly fill cauldrons with water or lava.",
+    "keywords": ["cauldron", "iron", "ingot", "water", "lava", "powder", "snow", "bottle", "dye", "leather", "armor", "potions", "dripstone"]
+  },
+  {
+    "question": "how do I make a brewing stand",
+    "answer": "Craft a brewing stand with 1 blaze rod and 3 cobblestone in a crafting table. Place over a heat source (fire, magma block). Use blaze powder as fuel. Combine water bottles with ingredients to make potions. Redstone extends duration, glowstone enhances level, gunpowder makes splash, dragon's breath makes lingering.",
+    "keywords": ["brewing", "stand", "blaze", "rod", "cobblestone", "potions", "fuel", "redstone", "glowstone", "gunpowder", "splash", "lingering", "dragon", "breath"]
+  },
+  {
+    "question": "how do I make a honey bottle",
+    "answer": "Find a bee nest or beehive. Use shears on a full nest to get honeycomb, or a glass bottle to get honey bottles. Honey bottles can be drunk to restore hunger and remove poison. Craft honeycomb into honey blocks or candles.",
+    "keywords": ["honey", "bottle", "bee", "nest", "hive", "shears", "comb", "blocks", "candles", "food", "poison", "heal"]
+  },
+  {
+    "question": "how do I make candles",
+    "answer": "Craft candles with 1 honeycomb and 1 string. Candles come in 16 colors when crafted with dye. Place candles and light them with flint and steel. Up to 4 candles can be placed on one block. Used for decoration and lighting.",
+    "keywords": ["candles", "honeycomb", "string", "dye", "colors", "light", "flint", "steel", "decoration"]
+  },
+  {
+    "question": "how do I make a spyglass",
+    "answer": "Craft a spyglass with 1 amethyst shard and 2 copper ingots in a crafting table. Right-click to zoom in on distant objects. Useful for scouting, finding structures, and navigation. Can be enchanted with Unbreaking.",
+    "keywords": ["spyglass", "amethyst", "shard", "copper", "ingot", "zoom", "scout", "navigation", "structure", "enchant"]
+  },
+  {
+    "question": "how do I make a recovery compass",
+    "answer": "Craft a recovery compass with 8 echo shards around a regular compass. Recovery compass points to where you last died. Only works in the dimension you died in. Echo shards are found in ancient cities.",
+    "keywords": ["recovery", "compass", "echo", "shards", "death", "location", "ancient", "city", "dimension"]
+  },
+  {
+    "question": "how do I make a bundle",
+    "answer": "Craft a bundle with 2 rabbit hide and 1 string in a crafting table. Bundles can hold a variety of items up to a total of 64 stack-equivalent slots. Items that stack to 64 take 1 slot; items that stack to 16 take 4 slots; unstackable items take 64 slots. Useful for inventory management.",
+    "keywords": ["bundle", "rabbit", "hide", "string", "inventory", "storage", "portable", "chest", "management"]
+  },
+  {
+    "question": "how do I make armor trims",
+    "answer": "Use a smithing table with armor trim templates and materials (ingots, gems, crystals). Trims add decorative patterns to armor. Templates found in various structures (nether, bastion, end city, etc.). Materials determine trim color.",
+    "keywords": ["armor", "trims", "smithing", "table", "templates", "materials", "ingots", "gems", "decorative", "patterns", "nether", "end", "city"]
+  },
+  {
+    "question": "how do I make a brush",
+    "answer": "Craft a brush with 1 copper ingot, 1 stick, and 1 feather in a column shape. Use the brush on suspicious sand or gravel in desert temples and ocean ruins to uncover loot. Brush carefully to reveal items without breaking them.",
+    "keywords": ["brush", "copper", "ingot", "stick", "feather", "suspicious", "sand", "gravel", "archaeology", "desert", "temple", "ocean", "ruins", "loot"]
+  },
+  {
+    "question": "how do I make a lightning rod",
+    "answer": "Craft a lightning rod with 3 copper ingots in a vertical line. Place it on top of structures to divert lightning strikes. Lightning rods emit a redstone signal when struck. Protects flammable blocks from lightning fires during storms.",
+    "keywords": ["lightning", "rod", "copper", "ingot", "storm", "protection", "fire", "redstone", "signal", "divert"]
+  },
+  {
+    "question": "how do I make tinted glass",
+    "answer": "Craft tinted glass with 4 amethyst shards and 1 glass in a crafting table. Tinted glass drops itself when broken, even without Silk Touch. It blocks light while being visually opaque.",
+    "keywords": ["tinted", "glass", "amethyst", "shards", "light", "privacy", "decorative", "window", "break"]
+  },
+  {
+    "question": "how do I find ancient cities",
+    "answer": "Ancient cities generate in the deep dark biome at Y -52. Look for sculk blocks and sculk sensors. Be careful of the Warden. Bring wool to dampen vibrations. Contains loot chests with echo shards, enchantments, and other valuable items.",
+    "keywords": ["ancient", "city", "deep", "dark", "sculk", "warden", "echo", "shards", "loot", "chest", "biome", "wool", "vibrations"]
+  }
+]

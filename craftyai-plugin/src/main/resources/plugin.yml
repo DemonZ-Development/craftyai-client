@@ -1,0 +1,47 @@
+name: CraftyAI
+main: com.demonz.craftyai.CraftyAI
+version: '1.3.2'
+api-version: '1.13'
+folia-supported: true
+description: Neural AI companion for Minecraft — Powered by DemonZ Development
+author: DemonZ Development
+website: https://demonzdevelopment.online
+
+commands:
+  crafty:
+    description: CraftyAI neural engine commands
+    usage: /<command> [reload|status|mode|apikey|learn|ask|scan]
+    aliases: [craftyai, helper]
+
+permissions:
+  crafty.use:
+    description: Use player-facing CraftyAI commands such as memory and forget
+    default: true
+  crafty.chat:
+    description: Talk to the AI in chat
+    default: true
+  crafty.vision:
+    description: Scan blocks and entities
+    default: true
+  crafty.scan:
+    description: Use /crafty scan command for vision scanning
+    default: true
+  crafty.agentic:
+    description: Allow AI to execute agentic tasks (master toggle)
+    default: op
+    children:
+      crafty.agentic.gamemode: true
+  crafty.agentic.gamemode:
+    description: Allow AI to change player gamemode (creative/spectator)
+    default: op
+  crafty.actions:
+    description: Allow AI to execute actions (time, weather, give, teleport, etc.)
+    default: op
+    children:
+      crafty.actions.gamemode: true
+  crafty.actions.gamemode:
+    description: Allow AI to change player gamemode (creative/spectator)
+    default: op
+  crafty.admin:
+    description: Admin commands (reload, learn, status details)
+    default: op

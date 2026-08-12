@@ -1,0 +1,122 @@
+name: CraftyAI - Spigot/Paper Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-spigot*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Spigot/Paper Plugin Build (Java 17, Maven) ──────────────────
+  build-plugin:
+    name: Build Spigot/Paper Plugin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build Common Library
+        run: |
+          cd "$GITHUB_WORKSPACE/craftyai-common"
+          mvn -q install -DskipTests
+
+      - name: Build Plugin
+        run: |
+          cd "$GITHUB_WORKSPACE/craftyai-plugin"
+          mvn -q package -DskipTests
+          ls -lh target/craftyai-spigot-*.jar
+
+      - name: Gather Plugin Artifacts
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p spigot-artifacts
+          find craftyai-plugin/target/ -name "craftyai-spigot-*.jar" ! -name "*-sources.jar" ! -name "*original*" -exec cp {} spigot-artifacts/ \; || true
+          ls -lh spigot-artifacts/
+
+      - name: Upload Spigot Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spigot-artifacts
+          path: spigot-artifacts/*
+
+  # ── Publish Spigot Release ──────────────────────────────────────
+  publish-spigot-release:
+    name: Publish Spigot Release
+    needs: build-plugin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract Changelog for Release
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION%%-*}"
+          echo "Extracting changelog for version $VERSION..."
+          CHANGELOG_SECTION=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit;
+              if (index($0, "[" ver "]") > 0) { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          if [ -z "$CHANGELOG_SECTION" ]; then
+            CHANGELOG_SECTION="*No changelog entry found for this version.*"
+          fi
+
+          {
+            printf '# CraftyAI %s — Spigot/Paper Plugin Release\n\n' "${{ github.ref_name }}"
+            printf 'CraftyAI brings an intelligent, context-aware AI assistant directly into your Minecraft server.\n\n'
+            printf '%s\n\n' '---'
+            printf '## What'\''s Changed\n\n'
+            printf '%s\n\n' "$CHANGELOG_SECTION"
+            printf '%s\n\n' '---'
+            printf '## Download & Installation\n\n'
+            printf '| File | Platform |\n'
+            printf '|------|----------|\n'
+            printf '| `craftyai-spigot-*.jar` | Spigot, Paper, Purpur, Folia (Minecraft 1.8+) — drop into your `plugins/` folder |\n\n'
+            printf '%s\n\n' '---'
+            printf '## Getting Started\n\n'
+            printf '1. Drop the plugin jar into `plugins/`.\n'
+            printf '2. Restart your server.\n'
+            printf '3. As an OP, type `/crafty apikey` in-game; the plugin will mint and save your connection key for you.\n'
+            printf '4. Chat with the AI by prefixing your message with `@crafty ` (or just `@`).\n'
+            printf '5. Try an agentic action: `@crafty change time to day` or `@crafty scan the area`.\n\n'
+            printf 'Need help? Visit https://craftyai.pages.dev or join our Discord: https://discord.gg/zCkE44hsBR\n'
+          } > release-notes.md
+
+      - name: Download Spigot Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2.4.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CraftyAI ${{ github.ref_name }}
+          prerelease: false
+          draft: false
+          body_path: release-notes.md
+          files: |
+            release-artifacts/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

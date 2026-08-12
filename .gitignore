@@ -1,0 +1,36 @@
+# Build outputs
+target/
+build/
+out/
+bin/
+*.jar
+*.class
+
+# Gradle caches & local state
+.gradle/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Environment & secrets
+.env
+.env.local
+*.local
+
+# Maven
+*.pom.bak
+dependency-reduced-pom.xml

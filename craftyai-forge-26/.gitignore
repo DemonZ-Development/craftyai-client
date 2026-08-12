@@ -1,0 +1,17 @@
+build/
+*.jar
+*.class
+out/
+run/
+.gradle/
+gradle/
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.log
+logs/
