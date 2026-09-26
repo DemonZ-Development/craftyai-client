@@ -6,7 +6,7 @@
 
     <groupId>com.demonz</groupId>
     <artifactId>craftyai-parent</artifactId>
-    <version>1.3.2</version>
+    <version>1.4.0</version>
     <packaging>pom</packaging>
 
     <name>CraftyAI</name>

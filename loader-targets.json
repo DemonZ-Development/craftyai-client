@@ -1,0 +1,161 @@
+{
+  "source_date": "2026-09-17",
+  "note": "Official target inventory, not tested support. Forge null means absent from official release index.",
+  "targets": [
+    {
+      "minecraft": "1.20.4",
+      "forge": "1.20.4-49.2.8",
+      "neoforge": "20.4.251",
+      "fabric_api": "0.97.3+1.20.4",
+      "status": "pending",
+      "yarn": "1.20.4+build.3"
+    },
+    {
+      "minecraft": "1.20.5",
+      "forge": null,
+      "neoforge": "20.5.21-beta",
+      "fabric_api": "0.97.8+1.20.5",
+      "status": "pending",
+      "yarn": "1.20.5+build.1"
+    },
+    {
+      "minecraft": "1.20.6",
+      "forge": "1.20.6-50.2.10",
+      "neoforge": "20.6.141",
+      "fabric_api": "0.100.8+1.20.6",
+      "status": "pending",
+      "yarn": "1.20.6+build.3"
+    },
+    {
+      "minecraft": "1.21",
+      "forge": "1.21-51.0.33",
+      "neoforge": "21.0.167",
+      "fabric_api": "0.102.0+1.21",
+      "status": "pending",
+      "yarn": "1.21+build.9"
+    },
+    {
+      "minecraft": "1.21.1",
+      "forge": "1.21.1-52.1.16",
+      "neoforge": "21.1.250",
+      "fabric_api": "0.116.17+1.21.1",
+      "status": "pending",
+      "yarn": "1.21.1+build.3"
+    },
+    {
+      "minecraft": "1.21.2",
+      "forge": null,
+      "neoforge": "21.2.1-beta",
+      "fabric_api": "0.106.1+1.21.2",
+      "status": "pending",
+      "yarn": "1.21.2+build.1"
+    },
+    {
+      "minecraft": "1.21.3",
+      "forge": "1.21.3-53.1.12",
+      "neoforge": "21.3.97",
+      "fabric_api": "0.114.1+1.21.3",
+      "status": "pending",
+      "yarn": "1.21.3+build.2"
+    },
+    {
+      "minecraft": "1.21.4",
+      "forge": "1.21.4-54.1.18",
+      "neoforge": "21.4.157",
+      "fabric_api": "0.119.4+1.21.4",
+      "status": "pending",
+      "yarn": "1.21.4+build.8"
+    },
+    {
+      "minecraft": "1.21.5",
+      "forge": "1.21.5-55.1.13",
+      "neoforge": "21.5.98",
+      "fabric_api": "0.128.2+1.21.5",
+      "status": "pending",
+      "yarn": "1.21.5+build.1"
+    },
+    {
+      "minecraft": "1.21.6",
+      "forge": "1.21.6-56.0.9",
+      "neoforge": "21.6.20-beta",
+      "fabric_api": "0.128.2+1.21.6",
+      "status": "pending",
+      "yarn": "1.21.6+build.1"
+    },
+    {
+      "minecraft": "1.21.7",
+      "forge": "1.21.7-57.0.3",
+      "neoforge": "21.7.25-beta",
+      "fabric_api": "0.129.0+1.21.7",
+      "status": "pending",
+      "yarn": "1.21.7+build.8"
+    },
+    {
+      "minecraft": "1.21.8",
+      "forge": "1.21.8-58.1.22",
+      "neoforge": "21.8.54",
+      "fabric_api": "0.136.1+1.21.8",
+      "status": "pending",
+      "yarn": "1.21.8+build.1"
+    },
+    {
+      "minecraft": "1.21.9",
+      "forge": "1.21.9-59.0.5",
+      "neoforge": "21.9.16-beta",
+      "fabric_api": "0.134.1+1.21.9",
+      "status": "pending",
+      "yarn": "1.21.9+build.1"
+    },
+    {
+      "minecraft": "1.21.10",
+      "forge": "1.21.10-60.1.15",
+      "neoforge": "21.10.64",
+      "fabric_api": "0.138.4+1.21.10",
+      "status": "pending",
+      "yarn": "1.21.10+build.3"
+    },
+    {
+      "minecraft": "1.21.11",
+      "forge": "1.21.11-61.2.1",
+      "neoforge": "21.11.45",
+      "fabric_api": "0.141.6+1.21.11",
+      "status": "pending",
+      "yarn": "1.21.11+build.6"
+    },
+    {
+      "minecraft": "26.1",
+      "forge": "26.1-62.0.9",
+      "neoforge": "26.1.0.19-beta",
+      "fabric_api": "0.145.1+26.1",
+      "status": "pending"
+    },
+    {
+      "minecraft": "26.1.1",
+      "forge": "26.1.1-63.0.2",
+      "neoforge": "26.1.1.15-beta",
+      "fabric_api": "0.145.4+26.1.1",
+      "status": "pending"
+    },
+    {
+      "minecraft": "26.1.2",
+      "forge": "26.1.2-64.1.3",
+      "neoforge": "26.1.2.109",
+      "fabric_api": "0.155.3+26.1.2",
+      "status": "pending"
+    },
+    {
+      "minecraft": "26.2",
+      "forge": "26.2-65.1.3",
+      "neoforge": "26.2.0.87",
+      "fabric_api": "0.160.0+26.2",
+      "status": "pending"
+    },
+    {
+      "minecraft": "26.3",
+      "forge": null,
+      "neoforge": "26.3.0.3-beta",
+      "fabric_api": "0.160.6+26.3",
+      "status": "pending"
+    }
+  ]
+}

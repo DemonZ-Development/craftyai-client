@@ -32,10 +32,15 @@ CraftyAI brings a neural AI companion directly into your Minecraft server. It un
 |-----------|----------|--------------------|
 | `craftyai-plugin` | Spigot / Paper / Purpur / Folia | 1.8+ |
 | `craftyai-fabric` | Fabric (client & server) | 1.20 – 1.21.x |
-| `craftyai-fabric-26` | Fabric (client & server) | 26.x |
+| `craftyai-fabric-26` | Fabric (client & server) | 26.x (26.1 – 26.3) |
 | `craftyai-forge` | Forge | 1.20.4 |
 | `craftyai-forge-1206` | Forge | 1.20.6 |
-| `craftyai-forge-26` | NeoForge | 26.x |
+| `craftyai-forge-26` | NeoForge | 26.x (26.1 – 26.3) |
+| `craftyai-fabric-matrix` | Fabric Matrix Loader | 1.20.4 – 26.3 |
+| `craftyai-forge-matrix` | Forge Matrix Loader | 1.20.4 – 1.21.3 |
+| `craftyai-forge-modern-matrix` | Forge Modern Matrix Loader | 26.x |
+| `craftyai-neoforge-legacy-matrix` | NeoForge Legacy Matrix Loader | 1.20.4 – 1.20.6 |
+| `craftyai-neoforge-matrix` | NeoForge Matrix Loader | 1.21.0 – 26.3 |
 | `craftyai-common` | Shared library used by all components | — |
 
 ## Installation
@@ -59,6 +64,7 @@ CraftyAI brings a neural AI companion directly into your Minecraft server. It un
 - `/crafty scan` — trigger a vision scan (supported platforms)
 - `/crafty settings` — open the settings screen (mods) / manage options (plugin)
 - `/crafty status` — show connection status, tier, and model
+- `/craftyclient cancel` — cancel an active agentic action run
 
 ## Building from Source
 
@@ -84,6 +90,10 @@ The Gradle wrapper is pinned to 8.10.2 (legacy targets). CI builds MC 26.x targe
 # Modern Fabric + NeoForge (MC 26.x, JDK 25, Gradle 9.x)
 gradle :craftyai-fabric-26:build -Ptarget=modern
 gradle :craftyai-forge-26:build -Ptarget=forge26
+
+# Matrix builds across versions
+gradle :craftyai-fabric-matrix:build -Ptarget=fabric-matrix -PminecraftVersion=1.21.1
+gradle :craftyai-neoforge-matrix:build -Ptarget=neoforge-matrix -PminecraftVersion=1.21.1
 ```
 
 ## Documentation

@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.demonz.craftyai.common.VisionScanner;
@@ -40,78 +39,114 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Fabric-specific implementation of Vision Scanner (Mojang Mappings for MC 26.x)
- */
 public class FabricVisionScannerProvider implements VisionScanner.VisionScannerProvider {
 
     @Override
     public VisionScanner.ScanResult scan(Object playerObj, Object worldObj) {
-        if (!(playerObj instanceof Player) || !(worldObj instanceof ServerLevel)) {
+        if (!(playerObj instanceof Player) || !(worldObj instanceof Level)) {
             return new VisionScanner.ScanResult();
         }
 
         Player player = (Player) playerObj;
-        ServerLevel world = (ServerLevel) worldObj;
+        Level world = (Level) worldObj;
         VisionScanner.ScanResult result = new VisionScanner.ScanResult();
 
-        // Scan blocks around the player (5x5x5 area)
+        result.scanTarget = getScanTarget(player, world);
+
         scanNearbyBlocks(player, world, result);
 
-        // Scan entities around the player (16 block radius)
         scanNearbyEntities(player, world, result);
 
-        // Get biome information
         result.biome = getBiomeName(player, world);
 
-        // Get time of day
         result.timeOfDay = getTimeOfDay(world);
 
-        // Get weather
         result.weather = getWeather(world);
 
-        // Get player status
         result.health = (int) player.getHealth();
         result.foodLevel = player.getFoodData().getFoodLevel();
 
-        // Scan inventory
         scanInventory(player, result);
 
-        // --- Permission & World Context ---
         result.hasOp = isOp(player, world);
         result.canFly = player.getAbilities().mayfly;
         result.cheatsEnabled = result.hasOp;
         result.difficulty = world.getDifficulty().name().toLowerCase();
-        result.pvpEnabled = world.isPvpAllowed();
+        result.pvpEnabled = world instanceof ServerLevel serverLevel && serverLevel.isPvpAllowed();
         result.dimension = world.dimension().identifier().getPath();
         result.serverBrand = "fabric";
-        result.worldType = world.getServer().isDedicatedServer() ? "dedicated" : "singleplayer";
+        result.worldType = world.getServer() == null ? "multiplayer" : world.getServer().isDedicatedServer() ? "dedicated" : "singleplayer";
 
-        // Gamemode
         if (player instanceof ServerPlayer) {
             ServerPlayer sp = (ServerPlayer) player;
             result.gameMode = sp.gameMode.getGameModeForPlayer().getName();
         }
 
-        // Active potion effects
         player.getActiveEffects().forEach(effect -> {
             String effectName = effect.getEffect().value().getDisplayName().getString();
             int amplifier = effect.getAmplifier() + 1;
-            int duration = effect.getDuration() / 20; // ticks to seconds
+            int duration = effect.getDuration() / 20;
             result.activeEffects.add(effectName + " " + amplifier + " (" + duration + "s)");
         });
 
         return result;
     }
 
-    private void scanNearbyBlocks(Player player, ServerLevel world, VisionScanner.ScanResult result) {
+    private VisionScanner.TargetInfo getScanTarget(Player player, Level world) {
+        try {
+            net.minecraft.world.phys.HitResult hit = player.pick(6.0D, 1.0F, false);
+            net.minecraft.world.phys.Vec3 start = player.getEyePosition();
+            net.minecraft.world.phys.Vec3 direction = player.getViewVector(1.0F).scale(6.0D);
+            double limit = hit == null ? 36.0D : start.distanceToSqr(hit.getLocation());
+            net.minecraft.world.phys.EntityHitResult entityHit = net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(
+                    player, start, start.add(direction), player.getBoundingBox().expandTowards(direction).inflate(1.0D),
+                    entity -> !entity.isSpectator() && entity.isPickable(), limit);
+            if (entityHit != null) hit = entityHit;
+            if (hit == null || hit.getType() == net.minecraft.world.phys.HitResult.Type.MISS) return null;
+
+            BlockPos playerPos = player.blockPosition();
+            int dist = (int) Math.round(player.getEyePosition().distanceTo(hit.getLocation()));
+
+            if (hit instanceof net.minecraft.world.phys.BlockHitResult) {
+                BlockPos pos = ((net.minecraft.world.phys.BlockHitResult) hit).getBlockPos();
+                BlockState state = world.getBlockState(pos);
+                Identifier blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+                VisionScanner.TargetInfo target = new VisionScanner.TargetInfo(
+                        "block", blockId != null ? blockId.getPath() : "unknown", dist,
+                        (pos.getX() - playerPos.getX()) + "," + (pos.getY() - playerPos.getY()) + "," + (pos.getZ() - playerPos.getZ()));
+                state.getValues().forEach(entry -> target.properties.put(entry.property().getName(), String.valueOf(entry.value())));
+                return target;
+            }
+            if (hit instanceof net.minecraft.world.phys.EntityHitResult) {
+                Entity entity = ((net.minecraft.world.phys.EntityHitResult) hit).getEntity();
+                Identifier typeId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+                boolean hostile = entity instanceof Mob && !(entity instanceof Animal);
+                VisionScanner.TargetInfo target = new VisionScanner.TargetInfo(
+                        "entity",
+                        entity.getName().getString(),
+                        dist,
+                        (int) (entity.getX() - player.getX()) + "," + (int) (entity.getY() - player.getY()) + "," + (int) (entity.getZ() - player.getZ()));
+                target.properties.put("type", typeId != null ? typeId.getPath() : "unknown");
+                target.properties.put("temperament", hostile ? "hostile" : "passive");
+                if (entity instanceof net.minecraft.world.entity.LivingEntity living) {
+                    target.properties.put("health", (int) living.getHealth() + "/" + (int) living.getMaxHealth());
+                }
+                return target;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
+    }
+
+    private void scanNearbyBlocks(Player player, Level world, VisionScanner.ScanResult result) {
         BlockPos playerPos = player.blockPosition();
-        int radius = 2; // 5x5x5 area
+        int radius = 2;
 
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
-                    if (x == 0 && y == 0 && z == 0) continue; 
+                    if (x == 0 && y == 0 && z == 0) continue;
 
                     BlockPos pos = playerPos.offset(x, y, z);
                     BlockState state = world.getBlockState(pos);
@@ -122,7 +157,7 @@ public class FabricVisionScannerProvider implements VisionScanner.VisionScannerP
 
                     int distance = Math.abs(x) + Math.abs(y) + Math.abs(z);
 
-                    if (!blockName.equals("air") && !blockName.equals("grass_block") 
+                    if (!blockName.equals("air") && !blockName.equals("grass_block")
                         && !blockName.equals("dirt") && !blockName.equals("stone")
                         && !blockName.equals("cave_air")) {
                         result.nearbyBlocks.add(new VisionScanner.BlockInfo(
@@ -136,7 +171,7 @@ public class FabricVisionScannerProvider implements VisionScanner.VisionScannerP
         }
     }
 
-    private void scanNearbyEntities(Player player, ServerLevel world, VisionScanner.ScanResult result) {
+    private void scanNearbyEntities(Player player, Level world, VisionScanner.ScanResult result) {
         List<Entity> entities = world.getEntities(player, player.getBoundingBox().inflate(16.0));
 
         for (Entity entity : entities) {
@@ -166,7 +201,7 @@ public class FabricVisionScannerProvider implements VisionScanner.VisionScannerP
         }
     }
 
-    private VisionScanner.BiomeInfo getBiomeName(Player player, ServerLevel world) {
+    private VisionScanner.BiomeInfo getBiomeName(Player player, Level world) {
         try {
             String biomeName = world.getBiome(player.blockPosition()).unwrapKey().map(key -> key.identifier().getPath()).orElse("unknown");
             return new VisionScanner.BiomeInfo(biomeName);
@@ -175,7 +210,7 @@ public class FabricVisionScannerProvider implements VisionScanner.VisionScannerP
         }
     }
 
-    private String getTimeOfDay(ServerLevel world) {
+    private String getTimeOfDay(Level world) {
         long time = world.getDefaultClockTime() % 24000;
         if (time < 6000) return "morning";
         if (time < 12000) return "day";
@@ -183,7 +218,7 @@ public class FabricVisionScannerProvider implements VisionScanner.VisionScannerP
         return "night";
     }
 
-    private String getWeather(ServerLevel world) {
+    private String getWeather(Level world) {
         if (world.isRaining()) {
             return world.isThundering() ? "thunderstorm" : "rain";
         }
@@ -210,8 +245,9 @@ public class FabricVisionScannerProvider implements VisionScanner.VisionScannerP
         result.inventory = inventory;
     }
 
-    private boolean isOp(Player player, ServerLevel world) {
-        return player instanceof ServerPlayer serverPlayer && world.getServer().getPlayerList().isOp(serverPlayer.nameAndId());
+    private boolean isOp(Player player, Level world) {
+        return player instanceof ServerPlayer serverPlayer && world.getServer() != null
+                && world.getServer().getPlayerList().isOp(serverPlayer.nameAndId());
     }
 
     private void addEquipmentItem(ItemStack stack, Map<String, Integer> inventory) {

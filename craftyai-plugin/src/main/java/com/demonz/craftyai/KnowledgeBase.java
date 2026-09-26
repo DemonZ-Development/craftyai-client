@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.google.gson.JsonArray;
@@ -25,11 +24,6 @@ import java.io.*;
 import java.util.*;
 import java.util.logging.Level;
 
-/**
- * KnowledgeBase — Loads and provides local knowledge entries for offline/fallback RAG.
- * Reads JSON files from plugins/CraftyAI/knowledge/ directory.
- * Uses Gson for proper JSON parsing.
- */
 public class KnowledgeBase {
 
     private final CraftyAI plugin;
@@ -44,7 +38,7 @@ public class KnowledgeBase {
         File knowledgeDir = new File(plugin.getDataFolder(), "knowledge");
         if (!knowledgeDir.exists()) {
             knowledgeDir.mkdirs();
-            // Save default knowledge files from resources
+
             saveDefaultKnowledge();
         }
 
@@ -70,20 +64,17 @@ public class KnowledgeBase {
     }
 
     private void saveDefaultKnowledge() {
-        // Save embedded knowledge files from jar resources
+
         String[] defaults = {"ai_memory_guidelines.json"};
         for (String name : defaults) {
             try {
                 plugin.saveResource("knowledge/" + name, false);
             } catch (Exception ignored) {
-                // Resource might not exist in jar
+
             }
         }
     }
 
-    /**
-     * Simple keyword-based search. Returns the best matching entry.
-     */
     public String findAnswer(String question) {
         if (entries.isEmpty()) return null;
 
@@ -98,9 +89,9 @@ public class KnowledgeBase {
             String entryText = (entry.getQuestion() + " " + entry.getKeywords()).toLowerCase();
 
             for (String word : words) {
-                if (word.length() < 3) continue; // Skip short words
+                if (word.length() < 3) continue;
                 if (entryText.contains(word)) {
-                    score += word.length(); // Longer word matches score higher
+                    score += word.length();
                 }
             }
 
@@ -110,20 +101,12 @@ public class KnowledgeBase {
             }
         }
 
-        // Require at least some relevance
         if (bestMatch != null && bestScore >= 6) {
             return bestMatch.getAnswer();
         }
         return null;
     }
 
-    /**
-     * Parse a knowledge JSON file using Gson.
-     * Supports two formats:
-     * 1. A JSON array of entry objects: [ { "question": "...", "answer": "...", "keywords": [...] }, ... ]
-     * 2. A JSON object with "entries" key: { "entries": [ ... ] }
-     * 3. A single JSON object: { "question": "...", "answer": "...", "keywords": "..." }
-     */
     private List<KnowledgeEntry> parseKnowledgeFile(String json, String filename) {
         List<KnowledgeEntry> result = new ArrayList<KnowledgeEntry>();
 
@@ -134,7 +117,7 @@ public class KnowledgeBase {
             if (root == null) return result;
 
             if (root.isJsonArray()) {
-                // Format 1: JSON array of entries
+
                 JsonArray array = root.getAsJsonArray();
                 for (JsonElement element : array) {
                     KnowledgeEntry entry = parseEntry(element, filename);
@@ -143,14 +126,14 @@ public class KnowledgeBase {
             } else if (root.isJsonObject()) {
                 JsonObject obj = root.getAsJsonObject();
                 if (obj.has("entries") && obj.get("entries").isJsonArray()) {
-                    // Format 2: Object with "entries" array
+
                     JsonArray array = obj.getAsJsonArray("entries");
                     for (JsonElement element : array) {
                         KnowledgeEntry entry = parseEntry(element, filename);
                         if (entry != null) result.add(entry);
                     }
                 } else if (obj.has("question") && obj.has("answer")) {
-                    // Format 3: Single entry object
+
                     KnowledgeEntry entry = parseEntry(obj, filename);
                     if (entry != null) result.add(entry);
                 }
@@ -162,9 +145,6 @@ public class KnowledgeBase {
         return result;
     }
 
-    /**
-     * Parse a single knowledge entry from a JsonElement.
-     */
     private KnowledgeEntry parseEntry(JsonElement element, String filename) {
         if (element == null || !element.isJsonObject()) return null;
         try {
@@ -173,7 +153,6 @@ public class KnowledgeBase {
             String answer = obj.has("answer") ? obj.get("answer").getAsString() : null;
             if (question == null || answer == null) return null;
 
-            // Keywords can be a string or an array of strings
             String keywords = "";
             if (obj.has("keywords")) {
                 JsonElement kwElement = obj.get("keywords");

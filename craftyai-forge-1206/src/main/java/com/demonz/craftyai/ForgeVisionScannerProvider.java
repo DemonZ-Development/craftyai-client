@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.demonz.craftyai.common.VisionScanner;
@@ -37,10 +36,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Forge-specific implementation of Vision Scanner
- * Scans the player's surroundings and provides context to the AI
- */
 public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerProvider {
 
     @Override
@@ -53,30 +48,24 @@ public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerPr
         Level world = (Level) worldObj;
         VisionScanner.ScanResult result = new VisionScanner.ScanResult();
 
-        // Scan blocks around the player (5x5x5 area)
+        result.scanTarget = getScanTarget(player, world);
+
         scanNearbyBlocks(player, world, result);
 
-        // Scan entities around the player (16 block radius)
         scanNearbyEntities(player, world, result);
 
-        // Get biome information
         result.biome = getBiomeName(player, world);
 
-        // Get time of day
         result.timeOfDay = getTimeOfDay(world);
 
-        // Get weather
         result.weather = getWeather(world);
 
-        // Get player status
         result.health = (int) player.getHealth();
         result.maxHealth = (int) player.getMaxHealth();
         result.foodLevel = player.getFoodData().getFoodLevel();
 
-        // Scan inventory
         scanInventory(player, result);
 
-        // --- Permission & World Context ---
         result.canFly = player.getAbilities().mayfly;
         result.difficulty = world.getDifficulty().getKey();
         result.dimension = world.dimension().location().getPath();
@@ -87,10 +76,9 @@ public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerPr
             result.hasOp = sp.hasPermissions(2);
             result.cheatsEnabled = sp.hasPermissions(2);
             result.gameMode = sp.gameMode.getGameModeForPlayer().getName();
-            result.pvpEnabled = sp.server.isPvpAllowed();
-            result.worldType = sp.server.isDedicatedServer() ? "dedicated" : "singleplayer";
+            result.pvpEnabled = sp.getServer().isPvpAllowed();
+            result.worldType = sp.getServer().isDedicatedServer() ? "dedicated" : "singleplayer";
 
-            // Active potion effects
             sp.getActiveEffects().forEach(effect -> {
                 String effectName = String.valueOf(effect.getEffect());
                 if (effectName.contains(".")) {
@@ -108,28 +96,77 @@ public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerPr
         return result;
     }
 
+    private VisionScanner.TargetInfo getScanTarget(Player player, Level world) {
+        try {
+            net.minecraft.world.phys.HitResult hit = player.pick(6.0D, 1.0F, false);
+            net.minecraft.world.phys.Vec3 start = player.getEyePosition();
+            net.minecraft.world.phys.Vec3 direction = player.getViewVector(1.0F).scale(6.0D);
+            double limit = hit == null ? 36.0D : start.distanceToSqr(hit.getLocation());
+            net.minecraft.world.phys.EntityHitResult entityHit = net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(
+                    player, start, start.add(direction), player.getBoundingBox().expandTowards(direction).inflate(1.0D),
+                    entity -> !entity.isSpectator() && entity.isPickable(), limit);
+            if (entityHit != null) hit = entityHit;
+            if (hit == null || hit.getType() == net.minecraft.world.phys.HitResult.Type.MISS) return null;
+
+            BlockPos playerPos = player.blockPosition();
+            int dist = (int) Math.round(player.getEyePosition().distanceTo(hit.getLocation()));
+
+            if (hit instanceof net.minecraft.world.phys.BlockHitResult) {
+                BlockPos pos = ((net.minecraft.world.phys.BlockHitResult) hit).getBlockPos();
+                BlockState state = world.getBlockState(pos);
+                ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(state.getBlock());
+                VisionScanner.TargetInfo target = new VisionScanner.TargetInfo(
+                        "block", blockId != null ? blockId.getPath() : "unknown", dist,
+                        (pos.getX() - playerPos.getX()) + "," + (pos.getY() - playerPos.getY()) + "," + (pos.getZ() - playerPos.getZ()));
+                for (Map.Entry<net.minecraft.world.level.block.state.properties.Property<?>, Comparable<?>> entry : state.getValues().entrySet()) {
+                    try {
+                        target.properties.put(entry.getKey().getName(), String.valueOf(entry.getValue()));
+                    } catch (Exception ignored) {}
+                }
+                return target;
+            }
+            if (hit instanceof net.minecraft.world.phys.EntityHitResult) {
+                Entity entity = ((net.minecraft.world.phys.EntityHitResult) hit).getEntity();
+                EntityType<?> type = entity.getType();
+                ResourceLocation typeId = ForgeRegistries.ENTITY_TYPES.getKey(type);
+                boolean hostile = entity instanceof Monster;
+                VisionScanner.TargetInfo target = new VisionScanner.TargetInfo(
+                        "entity",
+                        entity.getName().getString(),
+                        dist,
+                        (int) (entity.getX() - player.getX()) + "," + (int) (entity.getY() - player.getY()) + "," + (int) (entity.getZ() - player.getZ()));
+                target.properties.put("type", typeId != null ? typeId.getPath() : "unknown");
+                target.properties.put("temperament", hostile ? "hostile" : "passive");
+                if (entity instanceof LivingEntity living) {
+                    target.properties.put("health", (int) living.getHealth() + "/" + (int) living.getMaxHealth());
+                }
+                return target;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
+    }
+
     private void scanNearbyBlocks(Player player, Level world, VisionScanner.ScanResult result) {
         BlockPos playerPos = player.blockPosition();
-        int radius = 2; // 5x5x5 area
+        int radius = 2;
 
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
-                    if (x == 0 && y == 0 && z == 0) continue; // Skip player position
+                    if (x == 0 && y == 0 && z == 0) continue;
 
                     BlockPos pos = playerPos.offset(x, y, z);
                     BlockState state = world.getBlockState(pos);
                     Block block = state.getBlock();
 
-                    // Get block name from registry
                     ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(block);
                     String blockName = blockId != null ? blockId.getPath() : "unknown";
 
-                    // Calculate distance
                     int distance = Math.abs(x) + Math.abs(y) + Math.abs(z);
 
-                    // Only include interesting blocks (not air, grass, dirt)
-                    if (!blockName.equals("air") && !blockName.equals("grass_block") 
+                    if (!blockName.equals("air") && !blockName.equals("grass_block")
                         && !blockName.equals("dirt") && !blockName.equals("stone")
                         && !blockName.equals("cave_air")) {
                         result.nearbyBlocks.add(new VisionScanner.BlockInfo(
@@ -157,13 +194,10 @@ public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerPr
             String entityName = typeId != null ? typeId.getPath() : "unknown";
             String displayName = entity.getName().getString();
 
-            // Calculate distance
             double distance = entity.position().distanceTo(player.position());
 
-            // Determine if hostile
             boolean isHostile = entity instanceof Monster;
 
-            // Get relative position
             int relX = (int) (entity.getX() - player.getX());
             int relY = (int) (entity.getY() - player.getY());
             int relZ = (int) (entity.getZ() - player.getZ());
@@ -180,9 +214,9 @@ public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerPr
 
     private VisionScanner.BiomeInfo getBiomeName(Player player, Level world) {
         try {
-            Biome biome = world.getBiome(player.blockPosition()).value();
-            ResourceLocation biomeId = world.registryAccess().registryOrThrow(Registries.BIOME).getKey(biome);
-            return new VisionScanner.BiomeInfo(biomeId != null ? biomeId.getPath() : "unknown");
+            String biomeName = world.getBiome(player.blockPosition())
+                    .unwrapKey().map(key -> key.location().getPath()).orElse("unknown");
+            return new VisionScanner.BiomeInfo(biomeName);
         } catch (Exception e) {
             return new VisionScanner.BiomeInfo("unknown");
         }
@@ -206,8 +240,7 @@ public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerPr
     private void scanInventory(Player player, VisionScanner.ScanResult result) {
         Map<String, Integer> inventory = new HashMap<>();
 
-        // Main inventory
-        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+        for (int i = 0; i < Math.min(36, player.getInventory().getContainerSize()); i++) {
             ItemStack stack = player.getInventory().getItem(i);
             if (!stack.isEmpty()) {
                 String itemName = stack.getHoverName().getString();
@@ -215,19 +248,17 @@ public class ForgeVisionScannerProvider implements VisionScanner.VisionScannerPr
             }
         }
 
-        // Armor
-        for (ItemStack armor : player.getInventory().armor) {
-            if (!armor.isEmpty()) {
-                String itemName = armor.getHoverName().getString();
-                inventory.put(itemName, inventory.getOrDefault(itemName, 0) + armor.getCount());
+        for (net.minecraft.world.entity.EquipmentSlot slot : new net.minecraft.world.entity.EquipmentSlot[]{
+                net.minecraft.world.entity.EquipmentSlot.HEAD,
+                net.minecraft.world.entity.EquipmentSlot.CHEST,
+                net.minecraft.world.entity.EquipmentSlot.LEGS,
+                net.minecraft.world.entity.EquipmentSlot.FEET,
+                net.minecraft.world.entity.EquipmentSlot.OFFHAND}) {
+            ItemStack equip = player.getItemBySlot(slot);
+            if (!equip.isEmpty()) {
+                String itemName = equip.getHoverName().getString();
+                inventory.put(itemName, inventory.getOrDefault(itemName, 0) + equip.getCount());
             }
-        }
-
-        // Offhand
-        ItemStack offhand = player.getInventory().offhand.get(0);
-        if (!offhand.isEmpty()) {
-            String itemName = offhand.getHoverName().getString();
-            inventory.put(itemName, inventory.getOrDefault(itemName, 0) + offhand.getCount());
         }
 
         result.inventory = inventory;

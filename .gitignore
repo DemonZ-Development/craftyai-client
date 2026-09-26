@@ -5,9 +5,11 @@ out/
 bin/
 *.jar
 *.class
+build-check/
 
 # Gradle caches & local state
 .gradle/
+.gradle-forge-*/
 
 # IDE
 .idea/
@@ -30,6 +32,10 @@ logs/
 .env
 .env.local
 *.local
+
+# Run directories
+run/
+runs/
 
 # Maven
 *.pom.bak

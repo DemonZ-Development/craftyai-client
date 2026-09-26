@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.google.gson.JsonArray;
@@ -32,7 +31,8 @@ public class UpdateChecker {
     private final String projectId = "XOFIR6bb";
     private final String currentVersion;
     private static long lastCheckTime = 0;
-    private static final long CACHE_DURATION_MS = 3600_000; // 1 hour
+    private static final long CACHE_DURATION_MS = 3600_000;
+    private static final String ALLOWED_UPDATE_HOST = "api.modrinth.com";
 
     public UpdateChecker(CraftyAI plugin) {
         this.plugin = plugin;
@@ -48,13 +48,17 @@ public class UpdateChecker {
             public void run() {
                 HttpURLConnection connection = null;
                 try {
-                    URL url = URI.create("https://api.modrinth.com/v2/project/" + projectId + "/version").toURL();
+                    URI uri = URI.create("https://api.modrinth.com/v2/project/" + projectId + "/version");
+                    if (!ALLOWED_UPDATE_HOST.equals(uri.getHost())) {
+                        plugin.getLogger().warning("[CraftyAI] Update host not allowed");
+                        return;
+                    }
+                    URL url = uri.toURL();
                     connection = (HttpURLConnection) url.openConnection();
                     connection.setRequestMethod("GET");
                     connection.setRequestProperty("User-Agent", "CraftyAI-UpdateChecker/" + currentVersion);
                     connection.setConnectTimeout(5000);
                     connection.setReadTimeout(5000);
-
                     if (connection.getResponseCode() == 200) {
                         StringBuilder responseStr = new StringBuilder();
                         try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
@@ -63,11 +67,8 @@ public class UpdateChecker {
                                 responseStr.append(line);
                             }
                         }
-
-                        // Parse using Gson — find the first version_number from the array
                         String response = responseStr.toString();
                         String latestVersion = parseLatestVersion(response);
-                        
                         if (latestVersion != null && compareVersions(latestVersion, currentVersion) > 0) {
                             plugin.getLogger().warning("==============================================");
                             plugin.getLogger().warning("  CraftyAI Update Available!                  ");
@@ -90,11 +91,6 @@ public class UpdateChecker {
         });
     }
 
-    /**
-     * Parse the Modrinth version API response using Gson.
-     * The response is a JSON array of version objects, each with a "version_number" field.
-     * Returns the version_number of the first (latest) entry, or null on failure.
-     */
     private String parseLatestVersion(String responseBody) {
         try {
             if (responseBody == null || responseBody.trim().isEmpty()) return null;
@@ -102,6 +98,28 @@ public class UpdateChecker {
             if (root == null || !root.isJsonArray()) return null;
             JsonArray versions = root.getAsJsonArray();
             if (versions.size() == 0) return null;
+            for (int idx = 0; idx < versions.size(); idx++) {
+                JsonElement el = versions.get(idx);
+                if (!el.isJsonObject()) continue;
+                JsonObject obj = el.getAsJsonObject();
+                if (!obj.has("version_number")) continue;
+                boolean matchesLoader = false;
+                if (obj.has("loaders") && obj.get("loaders").isJsonArray()) {
+                    JsonArray loaders = obj.getAsJsonArray("loaders");
+                    for (JsonElement loaderEl : loaders) {
+                        String loader = loaderEl.getAsString();
+                        if ("paper".equals(loader) || "spigot".equals(loader) || "bukkit".equals(loader) || "folia".equals(loader) || "purpur".equals(loader) || "velocity".equals(loader) || "waterfall".equals(loader) || "bungeecord".equals(loader) || "sponge".equals(loader)) {
+                            matchesLoader = true;
+                            break;
+                        }
+                    }
+                } else {
+                    matchesLoader = true;
+                }
+                if (matchesLoader) {
+                    return obj.get("version_number").getAsString();
+                }
+            }
             JsonElement first = versions.get(0);
             if (!first.isJsonObject()) return null;
             JsonObject firstObj = first.getAsJsonObject();
@@ -114,18 +132,33 @@ public class UpdateChecker {
         return null;
     }
 
-    /**
-     * LOW-NEW-12: Semantic version comparison instead of string comparison.
-     * Returns positive if v1 > v2, negative if v1 < v2, zero if equal.
-     * Handles versions like "1.2.0-beta" by stripping non-numeric suffixes.
-     */
     private static int compareVersions(String v1, String v2) {
         String[] parts1 = v1.split("\\.");
         String[] parts2 = v2.split("\\.");
         int len = Math.max(parts1.length, parts2.length);
         for (int i = 0; i < len; i++) {
-            int a = i < parts1.length ? Integer.parseInt(parts1[i].replaceAll("[^0-9]", "")) : 0;
-            int b = i < parts2.length ? Integer.parseInt(parts2[i].replaceAll("[^0-9]", "")) : 0;
+            int a = 0;
+            int b = 0;
+            if (i < parts1.length) {
+                String p = parts1[i].replaceAll("[^0-9]", "");
+                if (!p.isEmpty()) {
+                    try {
+                        a = Integer.parseInt(p);
+                    } catch (NumberFormatException ex) {
+                        a = 0;
+                    }
+                }
+            }
+            if (i < parts2.length) {
+                String p = parts2[i].replaceAll("[^0-9]", "");
+                if (!p.isEmpty()) {
+                    try {
+                        b = Integer.parseInt(p);
+                    } catch (NumberFormatException ex) {
+                        b = 0;
+                    }
+                }
+            }
             if (a != b) return Integer.compare(a, b);
         }
         return 0;

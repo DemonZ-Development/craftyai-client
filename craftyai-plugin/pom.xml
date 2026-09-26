@@ -6,7 +6,7 @@
 
     <groupId>com.demonz</groupId>
     <artifactId>craftyai</artifactId>
-    <version>1.3.2</version>
+    <version>1.4.0</version>
     <packaging>jar</packaging>
 
     <name>CraftyAI</name>
@@ -16,15 +16,16 @@
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spigot.api.version>1.16.5-R0.1-SNAPSHOT</spigot.api.version>
     </properties>
 
     <repositories>
-        <!-- Spigot API -->
+
         <repository>
             <id>spigot-repo</id>
             <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
         </repository>
-        <!-- Paper API (also provides Spigot) -->
+
         <repository>
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
@@ -32,16 +33,14 @@
     </repositories>
 
     <dependencies>
-        <!-- Spigot API 1.16.5 — last Java 8 compatible version -->
-        <!-- Plugin runs on 1.9+ via VersionAdapter runtime checks -->
+
         <dependency>
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot-api</artifactId>
-            <version>1.16.5-R0.1-SNAPSHOT</version>
+            <version>${spigot.api.version}</version>
             <scope>provided</scope>
         </dependency>
 
-        <!-- bStats - Plugin Metrics -->
         <dependency>
             <groupId>org.bstats</groupId>
             <artifactId>bstats-bukkit</artifactId>
@@ -49,7 +48,6 @@
             <scope>compile</scope>
         </dependency>
 
-        <!-- GSON for JSON parsing -->
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
@@ -57,11 +55,10 @@
             <scope>compile</scope>
         </dependency>
 
-        <!-- CraftyAI Common Library -->
         <dependency>
             <groupId>com.demonz</groupId>
             <artifactId>craftyai-common</artifactId>
-            <version>1.3.2</version>
+            <version>1.4.0</version>
             <scope>compile</scope>
         </dependency>
     </dependencies>
@@ -74,12 +71,12 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
+                    <release>8</release>
                     <source>8</source>
                     <target>8</target>
                 </configuration>
             </plugin>
 
-            <!-- Shade bStats into the JAR with package relocation -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -120,7 +117,6 @@
             </plugin>
         </plugins>
 
-        <!-- Include resources (plugin.yml, config.yml, knowledge/) -->
         <resources>
             <resource>
                 <directory>src/main/resources</directory>

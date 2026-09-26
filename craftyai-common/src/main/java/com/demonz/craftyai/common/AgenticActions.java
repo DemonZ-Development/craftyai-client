@@ -13,22 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.util.Objects;
 import java.util.Set;
 import java.util.HashSet;
-
-/**
- * Per-action permission node map and categorization.
- * Each agentic action is associated with a Bukkit-style permission node and a risk level.
- *
- * Risk levels:
- *   SAFE      — no real-world impact (time-of-day, weather, give items to self)
- *   MODERATE  — affects other entities or player state (heal, feed, kill mobs, teleport)
- *   DESTRUCTIVE — requires explicit confirmation (gamemode change, mass kill, level 5 enchant)
- */
 public final class AgenticActions {
 
     public enum Risk { SAFE, MODERATE, DESTRUCTIVE }
@@ -64,9 +53,9 @@ public final class AgenticActions {
         register("WEATHER_THUNDER","crafty.agentic.weather",  Risk.SAFE);
         register("HEAL",           "crafty.agentic.heal",     Risk.SAFE);
         register("FEED",           "crafty.agentic.feed",     Risk.SAFE);
-        register("GIVE",           "crafty.agentic.give",     Risk.MODERATE); // becomes DESTRUCTIVE if count>16
+        register("GIVE",           "crafty.agentic.give",     Risk.MODERATE);
         register("EFFECT",         "crafty.agentic.effect",   Risk.MODERATE);
-        register("ENCHANT",        "crafty.agentic.enchant",  Risk.MODERATE); // becomes DESTRUCTIVE if level>=5
+        register("ENCHANT",        "crafty.agentic.enchant",  Risk.MODERATE);
         register("TP",             "crafty.agentic.teleport", Risk.MODERATE);
         register("TELEPORT_SPAWN", "crafty.agentic.teleport", Risk.MODERATE);
         register("KILL_MOBS",      "crafty.agentic.kill",     Risk.DESTRUCTIVE);
@@ -78,7 +67,6 @@ public final class AgenticActions {
         register("SCHEDULE_TASK",    "crafty.agentic.schedule", Risk.SAFE);
         register("DELAYED_ACTION",   "crafty.agentic.delayed",  Risk.SAFE);
 
-        // Aliases to recognize the LLM action strings
         ALIASES.put("TIME_DAY", "TIME_DAY");
         ALIASES.put("TIME_NIGHT", "TIME_NIGHT");
         ALIASES.put("WEATHER_CLEAR", "WEATHER_CLEAR");
@@ -96,19 +84,10 @@ public final class AgenticActions {
     private static void register(String key, String permission, Risk risk) {
         DEFS.put(key, new ActionDef(key, permission, risk));
     }
-
-    /**
-     * Look up a registered action by its canonical key.
-     */
     public static ActionDef get(String key) {
         if (key == null) return null;
         return DEFS.get(key.toUpperCase());
     }
-
-    /**
-     * Resolve an LLM-emitted action string like "TIME_DAY" or "GIVE:dirt:64" to its canonical key.
-     * For param-based actions (GIVE, EFFECT, ENCHANT, TP), returns the prefix.
-     */
     public static String canonicalize(String rawAction) {
         if (rawAction == null || rawAction.isEmpty()) return null;
         String upper = rawAction.trim().toUpperCase();
@@ -117,18 +96,13 @@ public final class AgenticActions {
         return ALIASES.getOrDefault(head, head);
     }
 
-    /**
-     * Determine the effective risk of an action, accounting for runtime parameters.
-     * Examples:
-     *   GIVE:dirt:64 -> MODERATE
-     *   GIVE:dirt:128 -> DESTRUCTIVE
-     *   ENCHANT:sharpness:5 -> DESTRUCTIVE
-     *   ENCHANT:sharpness:1 -> MODERATE
-     */
     public static Risk riskFor(String rawAction) {
         String canonical = canonicalize(rawAction);
         ActionDef def = get(canonical);
         if (def == null) return Risk.MODERATE;
+        if ("CHAT".equals(canonical) && isAllowedChatCommand(rawAction.substring(rawAction.indexOf(':') + 1))) {
+            return Risk.SAFE;
+        }
         if ("GIVE".equals(canonical)) {
             int count = parseCountParam(rawAction);
             if (count > 16) return Risk.DESTRUCTIVE;
@@ -139,10 +113,6 @@ public final class AgenticActions {
         }
         return def.risk();
     }
-
-    /**
-     * Get the permission node for a given action string.
-     */
     public static String permissionFor(String rawAction) {
         String canonical = canonicalize(rawAction);
         ActionDef def = get(canonical);
@@ -150,17 +120,10 @@ public final class AgenticActions {
         return def.permission();
     }
 
-    /**
-     * Get all registered actions for help/docs.
-     */
     public static Set<String> allKeys() {
         return new HashSet<>(DEFS.keySet());
     }
 
-    /**
-     * CHAT is intentionally restricted to read-only locate commands. Never pass
-     * an unconstrained LLM string to a Minecraft command dispatcher.
-     */
     public static boolean isAllowedChatCommand(String command) {
         if (command == null) return false;
         String normalized = command.trim();
@@ -169,6 +132,36 @@ public final class AgenticActions {
                 || normalized.indexOf('\n') >= 0 || normalized.indexOf('\r') >= 0
                 || normalized.indexOf(';') >= 0) return false;
         return normalized.matches("(?i)^locate\\s+(structure|biome|poi)\\s+#?(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+$");
+    }
+
+    public static String normalizeLocateCommand(String command) {
+        if (!isAllowedChatCommand(command)) return command;
+        String value = command.trim().replaceFirst("^/", "").toLowerCase(java.util.Locale.ROOT);
+        String[] parts = value.split("\\s+", 3);
+        boolean tag = parts[2].startsWith("#");
+        String id = tag ? parts[2].substring(1) : parts[2];
+        if (!id.contains(":")) id = "minecraft:" + id;
+        return parts[0] + " " + parts[1] + " " + (tag ? "#" : "") + id;
+    }
+
+    public static String description(String action) {
+        String kind = canonicalize(action);
+        if (kind == null) return "game action";
+        switch (kind) {
+            case "CHAT": return "find a location";
+            case "SCAN_BLOCKS": return "scan the surroundings";
+            case "TP": case "TELEPORT_SPAWN": return "teleport";
+            case "GIVE": return "give items";
+            case "EFFECT": return "apply an effect";
+            case "ENCHANT": return "enchant an item";
+            case "KILL_MOBS": return "remove nearby mobs";
+            case "HEAL": return "restore health";
+            case "FEED": return "restore hunger";
+            case "TIME_DAY": case "TIME_NIGHT": return "change the time";
+            case "WEATHER_CLEAR": case "WEATHER_RAIN": case "WEATHER_THUNDER": return "change the weather";
+            case "GAMEMODE_CREATIVE": case "GAMEMODE_SURVIVAL": case "GAMEMODE_SPECTATOR": return "change game mode";
+            default: return "game action";
+        }
     }
 
     private static int parseCountParam(String action) {

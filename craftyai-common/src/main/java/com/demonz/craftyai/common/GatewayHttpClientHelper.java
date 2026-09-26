@@ -13,26 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.net.http.HttpRequest;
 
-/**
- * Java 11+ helper for applying CraftyAI gateway headers to HttpRequest.Builder.
- * Used by Fabric and Forge mods (compiled with Gradle on Java 17/21).
- *
- * EXCLUDED from Maven build (Java 8 plugin) via pom.xml compiler excludes.
- */
 public final class GatewayHttpClientHelper {
 
     private GatewayHttpClientHelper() {
     }
 
-    /**
-     * Apply standard CraftyAI headers to an HttpRequest.Builder.
-     * Delegates to GatewayRequestHeaders for header values.
-     */
     public static HttpRequest.Builder apply(HttpRequest.Builder builder, String clientType, String sessionId) {
         builder.setHeader("User-Agent", GatewayRequestHeaders.userAgent(clientType));
         builder.setHeader("X-Client-Type", clientType);
@@ -45,17 +34,6 @@ public final class GatewayHttpClientHelper {
         return builder;
     }
 
-    /**
-     * Apply headers for custom provider connections.
-     * Uses the custom provider URL and key instead of the standard gateway.
-     *
-     * @param builder    The HttpRequest.Builder to apply headers to
-     * @param customUrl  The custom provider base URL
-     * @param customKey  The custom provider API key
-     * @param clientType The client type identifier (e.g., "Fabric", "Forge", "Bukkit")
-     * @param sessionId  The session ID for request tracking
-     * @return The same builder with custom provider headers applied
-     */
     public static HttpRequest.Builder applyCustomProvider(HttpRequest.Builder builder, String customUrl, String customKey, String clientType, String sessionId) {
         builder.setHeader("User-Agent", GatewayRequestHeaders.userAgent(clientType));
         builder.setHeader("X-Client-Type", clientType);

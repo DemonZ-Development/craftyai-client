@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import org.bukkit.Material;
@@ -31,14 +30,6 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * VisionListener V1.1 — Block & Entity Scanner
- * Supports multiple activation methods:
- *   - item_right_click: Hold configured item (default COMPASS) + right-click (no conflict with block placing)
- *   - command_only: Only /crafty scan triggers scans
- *   - shift_scan (legacy): Shift+Right-Click (causes conflict with block placing while sneaking)
- * Compatible with Minecraft 1.8 - 1.21+.
- */
 public class VisionListener implements Listener {
 
     private final CraftyAI plugin;
@@ -73,19 +64,6 @@ public class VisionListener implements Listener {
         this.engine = engine;
     }
 
-    // =====================================================================
-    //  ACTIVATION CHECK — Configurable activation method
-    // =====================================================================
-
-    /**
-     * Checks if the vision scan should be triggered based on config settings.
-     * Returns true if the interaction should trigger a scan, false otherwise.
-     *
-     * Priority:
-     * 1. If shift_scan_enabled is true, use legacy shift+right-click behavior
-     * 2. If activation is "item_right_click", check for held item + right-click (no sneaking required)
-     * 3. If activation is "command_only", never trigger from events
-     */
     private boolean shouldActivateScan(Player player) {
         if (!enabled) return false;
         if (shiftScanEnabled) {
@@ -110,21 +88,16 @@ public class VisionListener implements Listener {
         return false;
     }
 
-    // =====================================================================
-    //  EVENT HANDLERS
-    // =====================================================================
-
     @EventHandler
     public void onBlockInteract(PlayerInteractEvent e) {
-        // EquipmentSlot.HAND doesn't exist on 1.8 — guard with try-catch
+
         try {
             if (e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
         } catch (Throwable ignored) {
-            // 1.8: no dual-wield, all interactions are main hand
+
         }
         if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
 
-        // Check activation method from config
         if (!shouldActivateScan(e.getPlayer())) return;
 
         Player p = e.getPlayer();
@@ -138,14 +111,13 @@ public class VisionListener implements Listener {
 
     @EventHandler
     public void onEntityInteract(PlayerInteractEntityEvent e) {
-        // EquipmentSlot.HAND doesn't exist on 1.8 — guard with try-catch
+
         try {
             if (e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
         } catch (Throwable ignored) {
-            // 1.8: no dual-wield
+
         }
 
-        // Check activation method from config
         if (!shouldActivateScan(e.getPlayer())) return;
 
         Player p = e.getPlayer();
@@ -154,56 +126,68 @@ public class VisionListener implements Listener {
         scanEntity(p, e.getRightClicked());
     }
 
-    // =====================================================================
-    //  PUBLIC SCAN METHODS — callable from /crafty scan command
-    // =====================================================================
-
-    /**
-     * Scans a block and sends the AI analysis to the player.
-     * Can be called from the /crafty scan command.
-     */
     public void scanBlock(Player player, Block block) {
         if (!enabled) {
             adapter.sendMessage(player, "&7[CraftyAI] Vision scanning is disabled by this server.");
             return;
         }
-        String context = String.format(
-                "Vision Scan | Type: Block | Material: %s | Location: %d,%d,%d | Biome: %s",
-                getMaterialName(block.getType()),
-                block.getX(), block.getY(), block.getZ(),
-                block.getBiome().name()
-        );
+        StringBuilder ctx = new StringBuilder();
+        ctx.append("[VISION SCAN]\n");
+        ctx.append("Target Type: block\n");
+        ctx.append("Target Name: ").append(getMaterialName(block.getType())).append("\n");
+        if (block.getState() instanceof org.bukkit.block.Container) {
+            try {
+                org.bukkit.inventory.Inventory inv = ((org.bukkit.block.Container) block.getState()).getInventory();
+                Map<String, Integer> contents = new LinkedHashMap<String, Integer>();
+                for (org.bukkit.inventory.ItemStack item : inv.getContents()) {
+                    if (item != null && item.getType() != Material.AIR) {
+                        String itemName = getMaterialName(item.getType());
+                        contents.merge(itemName, item.getAmount(), Integer::sum);
+                    }
+                }
+                if (!contents.isEmpty()) {
+                    ctx.append("Contents: ");
+                    int n = 0;
+                    for (Map.Entry<String, Integer> e : contents.entrySet()) {
+                        if (n++ >= 8) { ctx.append("\u2026"); break; }
+                        if (n > 1) ctx.append(", ");
+                        ctx.append(e.getKey()).append(" x").append(e.getValue());
+                    }
+                    ctx.append("\n");
+                }
+            } catch (Throwable ignored) {}
+        }
+        ctx.append(com.demonz.craftyai.common.ScanFlow.privacyRules());
 
-        processScan(player, "Analyze this block: " + getMaterialName(block.getType()), context);
+        processScan(player, "Analyze this block: " + getMaterialName(block.getType()), ctx.toString());
     }
 
-    /**
-     * Scans an entity and sends the AI analysis to the player.
-     * Can be called from the /crafty scan command.
-     */
     public void scanEntity(Player player, Entity entity) {
         if (!enabled) {
             adapter.sendMessage(player, "&7[CraftyAI] Vision scanning is disabled by this server.");
             return;
         }
         String health = "N/A";
+        boolean hostile = false;
+        boolean tameable = false;
         if (entity instanceof LivingEntity) {
-            health = String.valueOf((int) ((LivingEntity) entity).getHealth());
+            LivingEntity living = (LivingEntity) entity;
+            health = String.valueOf((int) living.getHealth());
+            hostile = living instanceof org.bukkit.entity.Monster;
+            tameable = living instanceof org.bukkit.entity.Tameable;
         }
 
-        String context = String.format(
-                "Vision Scan | Type: Entity | Entity: %s | Name: %s | Health: %s",
-                getEntityName(entity.getType()),
-                entity.getCustomName() != null ? entity.getCustomName() : entity.getName(),
-                health
-        );
+        StringBuilder ctx = new StringBuilder();
+        ctx.append("[VISION SCAN]\n");
+        ctx.append("Target Type: entity\n");
+        ctx.append("Target Name: ").append(getEntityName(entity.getType())).append("\n");
+        ctx.append("Display Name: ").append(entity.getCustomName() != null ? entity.getCustomName() : entity.getName()).append("\n");
+        ctx.append("Health: ").append(health).append("\n");
+        ctx.append("Temperament: ").append(hostile ? "hostile" : tameable ? "tameable" : "passive").append("\n");
+        ctx.append(com.demonz.craftyai.common.ScanFlow.privacyRules());
 
-        processScan(player, "Analyze this entity: " + getEntityName(entity.getType()), context);
+        processScan(player, "Analyze this entity: " + getEntityName(entity.getType()), ctx.toString());
     }
-
-    // =====================================================================
-    //  INTERNAL SCAN PROCESSING
-    // =====================================================================
 
     private void processScan(final Player p, final String question, String context) {
         adapter.sendActionBar(p, "&b&lSCANNING TARGET...");

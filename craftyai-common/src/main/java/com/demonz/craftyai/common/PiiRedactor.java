@@ -13,32 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Lightweight PII (Personally Identifiable Information) redaction utility.
- * Replaces common PII patterns with category labels BEFORE sending prompts to LLMs
- * or storing in chat_memory, so we never persist or transmit sensitive data.
- *
- * Patterns covered:
- *   - Email addresses
- *   - IPv4 addresses
- *   - Phone numbers (US-style and international with + prefix)
- *   - Credit card numbers (13-19 digits, Luhn-validated when possible)
- *   - US SSN (xxx-xx-xxxx)
- *   - API keys/secrets (long hex/base64 strings)
- */
 public final class PiiRedactor {
     private static final Pattern EMAIL = Pattern.compile(
             "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b");
     private static final Pattern IPV4 = Pattern.compile(
             "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
     private static final Pattern PHONE = Pattern.compile(
-            "(?:(?:\\+?\\d{1,3}[\\s.-]?)?(?:\\(\\d{2,4}\\)|\\d{2,4})[\\s.-]?)?\\d{3,4}[\\s.-]?\\d{3,4}[\\s.-]?\\d{0,4}");
+            "\\b(?:(?:\\+?\\d{1,3}[\\s.-]?)?(?:\\(\\d{2,4}\\)|\\d{2,4})[\\s.-]?)?\\d{3,4}[\\s.-]?\\d{3,4}(?:[\\s.-]?\\d{1,4})?\\b");
     private static final Pattern SSN = Pattern.compile(
             "\\b\\d{3}-\\d{2}-\\d{4}\\b");
     private static final Pattern CC = Pattern.compile(
@@ -48,10 +34,6 @@ public final class PiiRedactor {
 
     private PiiRedactor() {}
 
-    /**
-     * Redact PII in the given input. Returns a new string with sensitive patterns replaced
-     * by category labels like [REDACTED:EMAIL].
-     */
     public static String redact(String input) {
         if (input == null || input.isEmpty()) return input;
         String s = input;
@@ -70,7 +52,7 @@ public final class PiiRedactor {
         while (m.find()) {
             String match = m.group();
             String digits = match.replaceAll("[^0-9]", "");
-            // Phone heuristic: 7-15 digits, must include 3+ sequential digits at end
+
             if (digits.length() >= 7 && digits.length() <= 15) {
                 m.appendReplacement(sb, Matcher.quoteReplacement("[REDACTED:PHONE]"));
             } else {

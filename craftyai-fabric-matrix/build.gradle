@@ -1,0 +1,96 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version '1.15.1'
+}
+
+version = '1.4.0'
+group = 'com.demonz'
+def mc = providers.gradleProperty('minecraftVersion').get()
+def targets = new groovy.json.JsonSlurper().parse(rootProject.file('loader-targets.json')).targets
+def target = targets.find { it.minecraft == mc && it.yarn != null }
+if (target == null) throw new GradleException("No mapped Fabric target for ${mc}")
+def javaVersion = mc == '1.20.4' ? 17 : 21
+def patch21 = mc.startsWith('1.21.') ? mc.tokenize('.').last().toInteger() : 0
+base.archivesName = "craftyai-fabric-mc${mc}"
+layout.buildDirectory = layout.projectDirectory.dir("build/mc${mc}")
+repositories { mavenCentral() }
+dependencies {
+    minecraft "com.mojang:minecraft:${mc}"
+    mappings "net.fabricmc:yarn:${target.yarn}:v2"
+    modImplementation 'net.fabricmc:fabric-loader:0.19.4'
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${target.fabric_api}"
+    implementation project(':craftyai-common')
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
+    withSourcesJar()
+}
+tasks.withType(JavaCompile).configureEach { options.release = javaVersion; options.encoding = 'UTF-8' }
+def prepareMappedSources = tasks.register('prepareMappedSources', Sync) {
+    inputs.property('minecraftVersion', mc)
+    inputs.file(project.buildFile)
+    from rootProject.file('craftyai-fabric/src/main/java')
+    into layout.buildDirectory.dir('generated/sources/compat')
+    filteringCharset = 'UTF-8'
+    filter { line ->
+        if (mc != '1.20.4') {
+            line = line.replace('getEffectType().getName()', 'getEffectType().value().getName()')
+            line = line.replace('Registries.STATUS_EFFECT.get(new Identifier("minecraft", effect))',
+                    'Registries.STATUS_EFFECT.getEntry(new Identifier("minecraft", effect)).orElseThrow()')
+        }
+        if (mc.startsWith('1.21')) {
+            line = line.replace('new Identifier(', 'Identifier.of(')
+            line = line.replace('Registries.ENCHANTMENT.get(Identifier.of("minecraft", enchant))',
+                    'player.getWorld().getRegistryManager().get(net.minecraft.registry.RegistryKeys.ENCHANTMENT).getEntry(Identifier.of("minecraft", enchant)).orElseThrow()')
+        }
+        if (patch21 >= 2) {
+            line = line.replace('getRegistryManager().get(', 'getRegistryManager().getOrThrow(')
+            line = line.replace('entity.damage(player.getServerWorld().getDamageSources()', 'entity.damage(player.getServerWorld(), player.getServerWorld().getDamageSources()')
+            line = line.replace(', player.getYaw(), player.getPitch())', ', java.util.Set.of(), player.getYaw(), player.getPitch(), false)')
+        }
+        if (patch21 >= 5) {
+            line = line.replace('getCurrentGameMode().getName()', 'getCurrentGameMode().name().toLowerCase(java.util.Locale.ROOT)')
+                    .replace('getGameMode().getName()', 'getGameMode().name().toLowerCase(java.util.Locale.ROOT)')
+                    .replace('player.getInventory().offHand.get(0)', 'player.getOffHandStack()')
+                    .replace('player.getInventory().armor', 'java.util.List.of(player.getEquippedStack(net.minecraft.entity.EquipmentSlot.FEET), player.getEquippedStack(net.minecraft.entity.EquipmentSlot.LEGS), player.getEquippedStack(net.minecraft.entity.EquipmentSlot.CHEST), player.getEquippedStack(net.minecraft.entity.EquipmentSlot.HEAD))')
+        }
+        if (patch21 >= 6) line = line.replace('.getServerWorld()', '.getWorld()')
+        if (patch21 >= 9) {
+            line = line.replace('.getWorld()', '.getEntityWorld()')
+                    .replace('player.getServer()', 'player.getEntityWorld().getServer()')
+                    .replace('sender.getServer()', 'sender.getEntityWorld().getServer()')
+                    .replace('fPlayer.getServer()', 'fPlayer.getEntityWorld().getServer()')
+                    .replace('player.clientWorld', 'player.getEntityWorld()')
+                    .replace('.getSpawnPos()', '.getSpawnPoint().getPos()')
+                    .replace('entity.getPos()', 'entity.getEntityPos()').replace('player.getPos()', 'player.getEntityPos()')
+                    .replace('"category.craftyai"', 'KeyBinding.Category.MISC')
+        }
+        if (patch21 >= 10) line = line.replace('.executeWithPrefix(', '.parseAndExecute(')
+        if (patch21 >= 11) {
+            line = line.replace('.hasPermissionLevel(2)', '.getPermissions().hasPermission(new net.minecraft.command.permission.Permission.Level(net.minecraft.command.permission.PermissionLevel.GAMEMASTERS))')
+                    .replace('world.getServer().isPvpEnabled()', '((net.minecraft.server.world.ServerWorld) world).isPvpEnabled()')
+        }
+        return line
+    }
+}
+sourceSets.main {
+    java.srcDir prepareMappedSources
+    java.srcDir project(':craftyai-common').file('src/main/java')
+    resources.srcDir rootProject.file('craftyai-fabric/src/main/resources')
+}
+loom {
+}
+processResources {
+    inputs.properties(version: project.version, minecraft: mc, fabricApi: target.fabric_api, javaVersion: javaVersion)
+    filesMatching('fabric.mod.json') { expand version: project.version }
+    doLast {
+        def file = new File(destinationDir, 'fabric.mod.json')
+        def metadata = new groovy.json.JsonSlurper().parse(file)
+        metadata.depends.minecraft = mc
+        metadata.depends.fabricloader = '>=0.19.4'
+        metadata.depends.'fabric-api' = ">=${target.fabric_api}"
+        metadata.depends.java = ">=${javaVersion}"
+        file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(metadata))
+    }
+}
+jar { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }

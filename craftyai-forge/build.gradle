@@ -18,7 +18,7 @@ repositories {
     mavenCentral()
 }
 
-version = '1.3.2'
+version = '1.4.0'
 group = 'com.demonz'
 archivesBaseName = 'craftyai-forge'
 
@@ -26,17 +26,19 @@ def currentJavaVersion = JavaVersion.current().majorVersion.toInteger()
 java.toolchain.languageVersion = JavaLanguageVersion.of(Math.max(currentJavaVersion, 17))
 
 tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
     options.release = 17
 }
 
 minecraft {
     mappings channel: 'official', version: '1.20.4'
-    
+
     runs {
         client {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
+            jvmArgs '-Djava.net.preferIPv4Stack=true'
             mods {
                 craftyai {
                     source sourceSets.main
@@ -69,16 +71,13 @@ sourceSets {
 }
 
 dependencies {
-    minecraft 'net.minecraftforge:forge:1.20.4-49.0.49'
-
-    // Shared CraftyAI library
+    minecraft 'net.minecraftforge:forge:1.20.4-49.2.8'
     implementation project(':craftyai-common')
-
-    // GSON for JSON parsing
     implementation 'com.google.code.gson:gson:2.10.1'
 }
 
 jar {
+    finalizedBy 'reobfJar'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     dependsOn ':craftyai-common:classes'
     manifest {
@@ -94,7 +93,3 @@ jar {
     }
     from project(":craftyai-common").sourceSets.main.output
 }
-
-// Official mappings used in MC 1.20.4; reobfJar is disabled to prevent mapping cache issues
-// jar.finalizedBy('reobfJar')
-

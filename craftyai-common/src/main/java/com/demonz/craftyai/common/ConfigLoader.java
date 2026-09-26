@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.nio.file.Files;
@@ -24,19 +23,8 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.StandardCopyOption;
 import java.util.function.Consumer;
 
-/**
- * Shared config loader for CraftyAI mods
- * Handles loading and saving configuration files with validation
- */
 public class ConfigLoader {
-    
-    /**
-     * Load configuration from file, creating default if it doesn't exist
-     * @param configDir Configuration directory path
-     * @param configFileName Configuration file name
-     * @param logger Consumer for log messages
-     * @return Loaded configuration
-     */
+
     public static CraftyAIConfig loadOrCreateConfig(String configDir, String configFileName, Consumer<String> logger) {
         Path configPath = Paths.get(configDir);
         Path configFile = configPath.resolve(configFileName);
@@ -49,14 +37,13 @@ public class ConfigLoader {
             if (!Files.exists(configFile)) {
                 CraftyAIConfig defaultConfig = new CraftyAIConfig();
                 saveConfig(configDir, configFileName, defaultConfig, logger);
-                logger.accept("[CraftyAI] Config created at " + configFileName + " — set your API key!");
+                logger.accept("[CraftyAI] Config created at " + configFileName + " \u2014 set your API key!");
                 return defaultConfig;
             }
 
             String content = new String(Files.readAllBytes(configFile), StandardCharsets.UTF_8);
             CraftyAIConfig config = CraftyAIConfig.fromJson(content);
-            
-            // Run configuration migrations
+
             boolean migrated = false;
             if (config.config_version < 2) {
                 logger.accept("[CraftyAI] Migrating craftyai.json from version " + config.config_version + " to 2...");
@@ -66,7 +53,7 @@ public class ConfigLoader {
                 }
                 migrated = true;
             }
-            
+
             if (config.config_version < 3) {
                 logger.accept("[CraftyAI] Migrating craftyai.json from version " + config.config_version + " to 3...");
                 config.config_version = 3;
@@ -84,7 +71,21 @@ public class ConfigLoader {
                 if (config.control_revision < 0) config.control_revision = 0;
                 migrated = true;
             }
-            
+
+            if (config.config_version < 5) {
+                logger.accept("[CraftyAI] Migrating craftyai.json from version " + config.config_version + " to 5...");
+                config.config_version = 5;
+                migrated = true;
+            }
+
+            if (config.config_version < 6) {
+                logger.accept("[CraftyAI] Migrating craftyai.json from version " + config.config_version + " to 6...");
+                config.config_version = 6;
+                if (config.vision_cooldown <= 0) config.vision_cooldown = 5;
+                if ("V".equals(config.vision_activation)) config.vision_activation = "item_right_click";
+                migrated = true;
+            }
+
             if (migrated) {
                 saveConfig(configDir, configFileName, config, logger);
             }
@@ -93,28 +94,23 @@ public class ConfigLoader {
             if (migrationError != null) {
                 logger.accept("[CraftyAI] Config validation note after migration: " + migrationError);
             }
-            
+
             return config;
         } catch (Exception e) {
             logger.accept("[CraftyAI] Failed to load config: " + e.getMessage());
-            return new CraftyAIConfig(); // Return default config on error
+            return new CraftyAIConfig();
         }
     }
 
-    /**
-     * Validates config. Returns null if valid, or an error message string if invalid.
-     */
     private static String validateConfig(CraftyAIConfig config) {
         if (config == null) return "Config is null";
-        
-        // Validate API key format if present
+
         if (config.api_key != null && !config.api_key.isEmpty() && !"YOUR_API_KEY_HERE".equals(config.api_key)) {
             if (!config.api_key.matches("^cai_[a-zA-Z0-9_-]{16,128}$")) {
                 return "Invalid API key format (must start with cai_)";
             }
         }
 
-        // Validate custom_provider_url if custom provider is enabled
         if (config.custom_provider_enabled) {
             if (config.custom_provider_url == null || config.custom_provider_url.isEmpty()) {
                 return "Custom provider enabled but URL is empty";
@@ -123,23 +119,15 @@ public class ConfigLoader {
                 return "Custom provider URL must start with http:// or https://";
             }
         }
-        
-        return null; // valid
+
+        return null;
     }
 
-    /**
-     * Save configuration to file
-     * @param configDir Configuration directory path
-     * @param configFileName Configuration file name
-     * @param config Configuration to save
-     * @param logger Consumer for log messages
-     */
     public static boolean saveConfig(String configDir, String configFileName, CraftyAIConfig config, Consumer<String> logger) {
         Path configPath = Paths.get(configDir);
         Path configFile = configPath.resolve(configFileName);
-        Path tempFile = configPath.resolve(configFileName + ".tmp");
+        Path tempFile = null;
 
-        // Validate before saving — warn but do NOT throw; destructive exceptions crash game loops
         String validationError = validateConfig(config);
         if (validationError != null) {
             logger.accept("[CraftyAI] Config validation warning (saving anyway): " + validationError);
@@ -149,8 +137,9 @@ public class ConfigLoader {
             if (!Files.exists(configPath)) {
                 Files.createDirectories(configPath);
             }
-            
+
             String json = config.toJson();
+            tempFile = Files.createTempFile(configPath, configFileName + ".", ".tmp");
             Files.write(tempFile, json.getBytes(StandardCharsets.UTF_8));
             try {
                 Files.move(tempFile, configFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -161,7 +150,7 @@ public class ConfigLoader {
             return true;
         } catch (Exception e) {
             logger.accept("[CraftyAI] Failed to save config: " + e.getMessage());
-            try { Files.deleteIfExists(tempFile); } catch (Exception ignored) { }
+            try { if (tempFile != null) Files.deleteIfExists(tempFile); } catch (Exception ignored) { }
             return false;
         }
     }

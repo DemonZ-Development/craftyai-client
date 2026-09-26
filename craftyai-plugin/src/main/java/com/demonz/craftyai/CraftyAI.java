@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import org.bukkit.ChatColor;
@@ -46,18 +45,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * CraftyAI V1.2 - Main Plugin Class (Slim Orchestrator)
- * ====================================================
- * Java 8 compatible. Uses HttpURLConnection.
- * Supports: Spigot/Paper/Folia/Purpur 1.8 - 1.21+
- *
- * Handlers extracted:
- *   ChatHandler   — chat activation, question extraction, AI dispatch
- *   ActionHandler — agentic action execution
- *   CommandHandler — /crafty command routing
- *   AnnouncementPoller — server announcement broadcast
- */
 public class CraftyAI extends JavaPlugin implements Listener {
 
     private PlatformDetector platform;
@@ -80,7 +67,6 @@ public class CraftyAI extends JavaPlugin implements Listener {
 
     private volatile String tier = "free";
 
-    // --- Session ID Management (synchronized) ---
     private synchronized String ensureServerId() {
         File sessionFile = new File(getDataFolder(), ".craftyai_session");
         if (sessionFile.exists()) {
@@ -122,7 +108,6 @@ public class CraftyAI extends JavaPlugin implements Listener {
 
     public String getServerId() { return ensureServerId(); }
 
-    // package-private for CommandHandler
     void reloadEngine() {
         String serverSecret;
         String serverId = ensureServerId();
@@ -168,6 +153,7 @@ public class CraftyAI extends JavaPlugin implements Listener {
                 String targetUrl = com.demonz.craftyai.common.GatewayRequestHeaders.getGatewayUrl();
                 java.net.URL url = new java.net.URL(targetUrl + "/v1/handshake-no-key");
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(false);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
@@ -218,7 +204,7 @@ public class CraftyAI extends JavaPlugin implements Listener {
                     getConfig().set("server.secret", fKey);
                     if (fSid != null && !fSid.isEmpty()) getConfig().set("server.id", fSid);
                     saveConfig();
-                    // Persist new server ID to session file so client-side code picks it up
+
                     if (fSid != null && !fSid.isEmpty()) {
                         try {
                             java.nio.file.Files.write(
@@ -236,13 +222,11 @@ public class CraftyAI extends JavaPlugin implements Listener {
         });
     }
 
-    // --- Lifecycle ---
-
     @Override
     public void onEnable() {
         saveDefaultConfig();
         reloadConfig();
-        // Removed duplicate migrateConfig(). ConfigMigrator (below) is the canonical migration system.
+
         try {
             com.demonz.craftyai.ConfigMigrator migrator = new com.demonz.craftyai.ConfigMigrator(getDataFolder(), getLogger());
             if (migrator.migrate(getConfig())) saveConfig();
@@ -386,8 +370,6 @@ public class CraftyAI extends JavaPlugin implements Listener {
         getLogger().info("[CraftyAI] Neural engine offline.");
     }
 
-    // --- Command delegation ---
-
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!command.getName().equalsIgnoreCase("crafty")) return false;
@@ -413,8 +395,6 @@ public class CraftyAI extends JavaPlugin implements Listener {
         if (commandHandler == null) return new ArrayList<>();
         return commandHandler.handleTabComplete(sender, command, alias, args);
     }
-
-    // --- Tier + Warning helpers ---
 
     public String getTier() { return tier; }
 
@@ -481,6 +461,8 @@ public class CraftyAI extends JavaPlugin implements Listener {
         config.require_confirmation = getConfig().getBoolean("ai.require_confirmation", true);
         config.allow_block_scanning = getConfig().getBoolean("ai.allow_block_scanning", true);
         config.vision_activation = getConfig().getString("vision.activation", "item_right_click");
+        config.vision_activation_item = getConfig().getString("vision.activation_item", "COMPASS");
+        config.vision_cooldown = getConfig().getInt("vision.cooldown", 5);
         config.vision_shift_scan_enabled = getConfig().getBoolean("vision.shift_scan_enabled", false);
         config.op_welcome_message = getConfig().getBoolean("op_welcome_message", true);
         return config;
@@ -503,6 +485,8 @@ public class CraftyAI extends JavaPlugin implements Listener {
             staged.set("ai.require_confirmation", config.require_confirmation);
             staged.set("ai.allow_block_scanning", config.allow_block_scanning);
             staged.set("vision.activation", config.vision_activation);
+            staged.set("vision.activation_item", config.vision_activation_item);
+            staged.set("vision.cooldown", config.vision_cooldown);
             staged.set("vision.shift_scan_enabled", config.vision_shift_scan_enabled);
             staged.set("op_welcome_message", config.op_welcome_message);
             staged.save(tempFile);
@@ -547,7 +531,7 @@ public class CraftyAI extends JavaPlugin implements Listener {
                 if (!warningElement.isJsonObject()) continue;
                 com.google.gson.JsonObject warning = warningElement.getAsJsonObject();
                 String message = warning.has("message") ? warning.get("message").getAsString() : "Unknown warning";
-                getLogger().warning("[CraftyAI] Session Warning: " + message.replaceAll("§.", ""));
+                getLogger().warning("[CraftyAI] Session Warning: " + message.replaceAll("\u00A7.", ""));
             }
             adapter.runSync(new Runnable() {
                 public void run() {
@@ -578,8 +562,6 @@ public class CraftyAI extends JavaPlugin implements Listener {
         sendPlayerMessage(player, "");
     }
 
-    // --- Public getters ---
-
     public CraftyEngine getEngine() { return engine; }
     public PlatformDetector getPlatform() { return platform; }
     public VersionAdapter getAdapter() { return adapter; }
@@ -591,7 +573,6 @@ public class CraftyAI extends JavaPlugin implements Listener {
     public VisionListener getVisionListener() { return visionListener; }
     public void sendPrivateResponse(Player player, String message) { adapter.sendMessage(player, message); }
 
-    // Adventure-safe player messaging with sendRawMessage fallback
     private static void sendPlayerMessage(Player player, String legacySectionMessage) {
         try {
             Class<?> componentClass = Class.forName("net.kyori.adventure.text.Component");

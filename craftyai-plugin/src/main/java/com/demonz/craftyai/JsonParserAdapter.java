@@ -13,18 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import java.lang.reflect.Method;
 
-/**
- * JsonParserAdapter — Legacy-compatible Gson parser injector.
- * Dynamically resolves modern static parseString(String) or legacy new JsonParser().parse(String)
- * depending on the server's compiled Gson library version to prevent NoSuchMethodError.
- */
 public class JsonParserAdapter {
     private static Method parseStringMethod = null;
     private static Object parserInstance = null;
@@ -32,24 +26,17 @@ public class JsonParserAdapter {
 
     static {
         try {
-            // Attempt to resolve modern static JsonParser.parseString(String) - Gson 2.8.6+
+
             parseStringMethod = JsonParser.class.getMethod("parseString", String.class);
         } catch (NoSuchMethodException e) {
             try {
-                // Fallback to legacy new JsonParser().parse(String) - Gson 2.8.5 and older
+
                 parserInstance = new JsonParser();
                 parseMethod = JsonParser.class.getMethod("parse", String.class);
             } catch (Exception ignored) {}
         }
     }
 
-    /**
-     * Parse the given JSON string into a JsonElement.
-     * Uses the best available method for the active Gson version.
-     * 
-     * @param json The JSON string to parse
-     * @return The parsed JsonElement, or null on failure
-     */
     public static JsonElement parse(String json) {
         if (json == null || json.trim().isEmpty()) return null;
         try {
@@ -59,7 +46,7 @@ public class JsonParserAdapter {
                 return (JsonElement) parseMethod.invoke(parserInstance, json);
             }
         } catch (Exception e) {
-            // Safety direct fallback in case of security manager or reflection failures
+
             try {
                 @SuppressWarnings("deprecation")
                 JsonElement result = new JsonParser().parse(json);

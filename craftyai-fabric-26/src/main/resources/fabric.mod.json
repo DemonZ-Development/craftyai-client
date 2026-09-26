@@ -3,13 +3,13 @@
   "id": "craftyai",
   "version": "${version}",
   "name": "CraftyAI",
-  "description": "Neural AI Companion for Minecraft â€” DemonZ Development",
+  "description": "Neural AI Companion for Minecraft — DemonZ Development",
   "authors": ["DemonZ Development"],
   "contact": {
     "homepage": "https://craftyai.pages.dev",
     "sources": "https://modrinth.com/plugin/craftyai"
   },
-  "license": "Apache-2.0",
+  "license": "ARR",
   "icon": "assets/craftyai/icon.png",
   "environment": "*",
   "entrypoints": {
@@ -22,9 +22,9 @@
   },
   "mixins": [],
   "depends": {
-    "fabricloader": ">=0.18.0",
-    "fabric-api": ">=0.100.0",
-    "minecraft": ">=26.0",
+    "fabricloader": ">=${fabricLoaderVersion}",
+    "fabric-api": ">=${fabricApiVersion}",
+    "minecraft": "${minecraftVersion}",
     "java": ">=25"
   }
 }

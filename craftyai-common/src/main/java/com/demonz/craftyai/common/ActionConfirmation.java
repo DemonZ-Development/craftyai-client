@@ -13,40 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Confirmation flow for destructive agentic actions.
- * Player must run `/crafty confirm` within 30s of triggering a destructive action.
- * Pending confirmations are stored per-player with a creation timestamp.
- */
 public final class ActionConfirmation {
     public static final long EXPIRY_MS = 30_000L;
     private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
-
-    /**
-     * Record a pending confirmation request for a destructive action.
-     */
     public void request(String playerKey, String action) {
         if (playerKey == null || playerKey.isEmpty()) return;
         pending.put(playerKey, new Pending(action, System.currentTimeMillis()));
     }
-
-    /**
-     * Cancel a pending confirmation (e.g., player triggered a different action).
-     */
     public void cancel(String playerKey) {
         if (playerKey == null) return;
         pending.remove(playerKey);
     }
-
-    /**
-     * Check whether a player has a pending confirmation. Auto-expires stale entries.
-     * @return The pending action string, or null if none / expired.
-     */
     public String peek(String playerKey) {
         if (playerKey == null) return null;
         Pending p = pending.get(playerKey);
@@ -57,11 +38,6 @@ public final class ActionConfirmation {
         }
         return p.action;
     }
-
-    /**
-     * Confirm and consume the pending action. Auto-expires stale entries.
-     * @return The confirmed action string, or null if no valid pending confirmation.
-     */
     public String confirm(String playerKey) {
         if (playerKey == null) return null;
         Pending p = pending.get(playerKey);
@@ -70,13 +46,8 @@ public final class ActionConfirmation {
             pending.remove(playerKey, p);
             return null;
         }
-        pending.remove(playerKey, p);
-        return p.action;
+        return pending.remove(playerKey, p) ? p.action : null;
     }
-
-    /**
-     * Clear all pending confirmations older than the expiry window.
-     */
     public void purgeExpired() {
         long now = System.currentTimeMillis();
         pending.entrySet().removeIf(e -> now - e.getValue().createdAt >= EXPIRY_MS);

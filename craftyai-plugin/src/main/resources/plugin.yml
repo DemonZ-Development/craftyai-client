@@ -1,11 +1,11 @@
 name: CraftyAI
 main: com.demonz.craftyai.CraftyAI
-version: '1.3.2'
+version: '1.4.0'
 api-version: '1.13'
 folia-supported: true
 description: Neural AI companion for Minecraft — Powered by DemonZ Development
 author: DemonZ Development
-website: https://demonzdevelopment.online
+website: https://demonz.org
 
 commands:
   crafty:

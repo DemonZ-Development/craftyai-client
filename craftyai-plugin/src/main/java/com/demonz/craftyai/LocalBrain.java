@@ -13,13 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
-/**
- * LocalBrain — Offline fallback AI using the local knowledge base.
- * Used when the cloud API is unreachable.
- */
 public class LocalBrain {
 
     private final CraftyAI plugin;
@@ -30,10 +25,6 @@ public class LocalBrain {
         this.knowledge = knowledge;
     }
 
-    /**
-     * Attempts to answer a question using the local knowledge base.
-     * Returns null if no relevant answer found.
-     */
     public String tryAnswer(String question) {
         if (knowledge == null || knowledge.size() == 0) return null;
         return knowledge.findAnswer(question);

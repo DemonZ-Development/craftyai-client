@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.google.gson.Gson;
@@ -28,10 +27,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Polls the Vault for announcements and broadcasts them to admins in-game.
- * Extracted from CraftyAI.java.
- */
 public class AnnouncementPoller {
 
     private final CraftyAI plugin;
@@ -72,6 +67,7 @@ public class AnnouncementPoller {
                     try {
                         URL url = new URL(vaultUrl + "/api/announcements");
                         conn = (HttpURLConnection) url.openConnection();
+                        conn.setInstanceFollowRedirects(false);
                         conn.setRequestMethod("GET");
                         conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
                         conn.setRequestProperty("X-CraftyAI-Version", plugin.getDescription().getVersion());

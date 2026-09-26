@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import org.bukkit.Bukkit;
@@ -39,10 +38,6 @@ import java.util.Set;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Handles execution of agentic AI actions (time, weather, heal, give, tp, scan, etc.).
- * Extracted from CraftyAI.java to reduce main class size.
- */
 public class ActionHandler {
 
     private static final int MAX_ACTIONS_PER_REQUEST = 5;
@@ -55,8 +50,7 @@ public class ActionHandler {
     private final ActionConfirmation confirmations;
     private final ConcurrentHashMap<String, Long> lastBlockScanTime = new ConcurrentHashMap<String, Long>();
     private static final int MAX_BLOCK_SCAN_TRACKED = 1000;
-    private static final long BLOCK_SCAN_TTL_MS = 360_000L; // 1 hour
-
+    private static final long BLOCK_SCAN_TTL_MS = 360_000L;
 
     public ActionHandler(VersionAdapter adapter, ActionAuditLog auditLog,
                          ActionRateLimiter rateLimiter, ActionConfirmation confirmations) {
@@ -67,30 +61,23 @@ public class ActionHandler {
         this.giveBlacklist = buildBlacklist();
     }
 
-    /**
-     * Confirm and consume a pending destructive action for the given player.
-     * @return The confirmed action string, or null if none / expired.
-     */
     public String confirmPlayer(String playerKey) {
         return confirmations != null ? confirmations.confirm(playerKey) : null;
     }
 
-    /**
-     * Public entry point. Wraps handleActionInternal with try-catch.
-     */
     public void handleAction(CraftyAI plugin, Player player, String actionString, String tier) {
-        handleAction(plugin, player, actionString, tier, false);
+        handleAction(plugin, player, actionString, tier, false, null);
     }
 
-    /**
-     * Public entry point with optional confirmation bypass.
-     * When alreadyConfirmed is true, destructive actions skip the confirmation check.
-     */
     public void handleAction(CraftyAI plugin, Player player, String actionString, String tier, boolean alreadyConfirmed) {
+        handleAction(plugin, player, actionString, tier, alreadyConfirmed, null);
+    }
+
+    public void handleAction(CraftyAI plugin, Player player, String actionString, String tier, boolean alreadyConfirmed, String originalQuestion) {
         if (actionString == null || actionString.trim().isEmpty() || actionString.equalsIgnoreCase("null")) return;
         if (!player.hasPermission("crafty.actions")) return;
         try {
-            handleActionInternal(plugin, player, actionString, tier, alreadyConfirmed);
+            handleActionInternal(plugin, player, actionString, tier, alreadyConfirmed, originalQuestion);
         } catch (Throwable t) {
             try {
                 plugin.getLogger().warning("[CraftyAI] Action handler error for " + player.getName() +
@@ -102,11 +89,11 @@ public class ActionHandler {
     }
 
     private void handleActionInternal(CraftyAI plugin, Player player, String actionString, String tier) {
-        handleActionInternal(plugin, player, actionString, tier, false);
+        handleActionInternal(plugin, player, actionString, tier, false, null);
     }
 
-    private void handleActionInternal(CraftyAI plugin, Player player, String actionString, String tier, boolean alreadyConfirmed) {
-        // Check both old key (backward compat) and new key
+    private void handleActionInternal(CraftyAI plugin, Player player, String actionString, String tier, boolean alreadyConfirmed, String originalQuestion) {
+
         boolean agenticEnabled = plugin.getConfig().getBoolean("ai.enable_actions",
             plugin.getConfig().getBoolean("ai.agentic_tasks_enabled", true));
         if (!agenticEnabled) {
@@ -142,18 +129,15 @@ public class ActionHandler {
             AgenticActions.Risk risk = AgenticActions.riskFor(action);
             boolean requireConfirmation = plugin.getConfig().getBoolean("ai.require_confirmation", true);
             if (risk == AgenticActions.Risk.DESTRUCTIVE && !alreadyConfirmed && requireConfirmation) {
-                String pending = confirmations != null ? confirmations.confirm(playerKey) : null;
-                if (pending == null || !pending.equalsIgnoreCase(upper)) {
-                    if (confirmations != null) confirmations.request(playerKey, action);
-                    adapter.sendMessage(player, "&c&o\u26A0 Destructive action: &f" + upper + " &c&o\u2014 run &e/crafty confirm &c&owithin 30s to execute.");
-                    if (auditLog != null) auditLog.log(player.getName(), playerKey, plugin.getServerId(), action, false, "awaiting confirmation");
-                    continue;
-                }
+                if (confirmations != null) confirmations.request(playerKey, action);
+                adapter.sendMessage(player, "&c&o\u26A0 Destructive action: &f" + upper + " &c&o\u2014 run &e/crafty confirm &c&owithin 30s to execute.");
+                if (auditLog != null) auditLog.log(player.getName(), playerKey, plugin.getServerId(), action, false, "awaiting confirmation");
+                continue;
             }
 
             try {
                 executeAtomicAction(player, upper);
-                if (!executeParameterizedAction(plugin, player, action, upper, tier, playerKey)) continue;
+                if (!executeParameterizedAction(plugin, player, action, upper, tier, playerKey, originalQuestion)) continue;
             } catch (Exception e) {
                 plugin.getLogger().warning("[Neural] Failed to execute AI action '" + action + "': " + e.getMessage());
                 if (auditLog != null) auditLog.log(player.getName(), playerKey, plugin.getServerId(), action, false, "exception: " + e.getMessage());
@@ -220,10 +204,7 @@ public class ActionHandler {
         }
     }
 
-    /**
-     * @return true to continue (success or unrecognised), false to skip the audit log for this action
-     */
-    private boolean executeParameterizedAction(CraftyAI plugin, Player player, String action, String upper, String tier, String playerKey) {
+    private boolean executeParameterizedAction(CraftyAI plugin, Player player, String action, String upper, String tier, String playerKey, String originalQuestion) {
         try {
             if (upper.startsWith("GIVE:")) {
                 handleGive(player, action, plugin);
@@ -238,7 +219,7 @@ public class ActionHandler {
                     adapter.sendMessage(player, "&7&o[Vision scanning is disabled by this server]");
                     return false;
                 }
-                handleScanBlocks(plugin, player, action, tier, playerKey);
+                handleScanBlocks(plugin, player, action, tier, playerKey, originalQuestion);
             } else if (upper.startsWith("SCHEDULE_TASK:")) {
                 handleScheduleTask(plugin, player, action, playerKey);
             } else if (upper.startsWith("DELAYED_ACTION:")) {
@@ -336,7 +317,7 @@ public class ActionHandler {
         } catch (NumberFormatException ignored) {}
     }
 
-    private void handleScanBlocks(CraftyAI plugin, Player player, String action, String tier, String playerKey) {
+    private void handleScanBlocks(CraftyAI plugin, Player player, String action, String tier, String playerKey, String originalQuestion) {
         String[] parts = action.split(":", 5);
         int radius = 8;
         boolean includePlayers = false;
@@ -373,26 +354,29 @@ public class ActionHandler {
             adapter.sendMessage(player, "&c&o[Block scan rate limit: wait " + ((30000L - (now - scanResult[0])) / 1000) + "s]");
             return;
         }
-        final int scanRadius = radius;
+        final int scanRadius = Math.min(radius, 16);
         final boolean incP = includePlayers;
         final boolean incE = includeEntities;
         final boolean incB = includeBlocks;
+
+        adapter.sendActionBar(player, "&b&l" + plugin.getAiName().toUpperCase() + " IS SCANNING...");
         adapter.runEntitySync(player, () -> {
             String aiName = plugin.getConfig().getString("ai.name", "Crafty");
-            int blockCount = 0;
-            int mobCount = 0;
-            int playerCount = 0;
             java.util.LinkedHashMap<String, Integer> blockCounts = new java.util.LinkedHashMap<>();
             java.util.LinkedHashMap<String, Integer> mobTypes = new java.util.LinkedHashMap<>();
             java.util.List<String> playerNames = new java.util.ArrayList<>();
+            int blockCount = 0;
+            int mobCount = 0;
+            int playerCount = 0;
             int bx = player.getLocation().getBlockX();
             int by = player.getLocation().getBlockY();
             int bz = player.getLocation().getBlockZ();
             org.bukkit.World world = player.getWorld();
             if (incB) {
-                for (int dx = -scanRadius; dx <= scanRadius; dx += 2) {
-                    for (int dy = -scanRadius; dy <= scanRadius; dy += 2) {
-                        for (int dz = -scanRadius; dz <= scanRadius; dz += 2) {
+                int step = scanRadius > 8 ? 3 : 2;
+                for (int dx = -scanRadius; dx <= scanRadius; dx += step) {
+                    for (int dy = -scanRadius; dy <= scanRadius; dy += step) {
+                        for (int dz = -scanRadius; dz <= scanRadius; dz += step) {
                             int chunkX = (bx + dx) >> 4;
                             int chunkZ = (bz + dz) >> 4;
                             if (!world.isChunkLoaded(chunkX, chunkZ)) continue;
@@ -416,51 +400,8 @@ public class ActionHandler {
                     }
                 }
             }
-            if (blockCount == 0 && mobCount == 0 && playerCount == 0) {
-                adapter.sendMessage(player, "&b&l[" + aiName + "] &7> &fIt's quiet around here \u2014 nothing notable within &e" + scanRadius + "&f blocks.");
-                return;
-            }
-            StringBuilder result = new StringBuilder();
-            result.append("&b&l[").append(aiName).append("] &7> &fScan results within &e").append(scanRadius).append("&f blocks:\n");
-            if (incB && !blockCounts.isEmpty()) {
-                result.append("&7  [&eBlocks&7] &f");
-                blockCounts.entrySet().stream()
-                    .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                    .limit(6)
-                    .forEach(e -> result.append("&7").append(e.getKey()).append(" &7x&e").append(e.getValue()).append("&7, "));
-                if (result.toString().endsWith(", ")) result.setLength(result.length() - 2);
-                result.append("\n");
-            }
-            if (incE && !mobTypes.isEmpty()) {
-                result.append("&7  [&cMobs&7] &f");
-                mobTypes.entrySet().stream()
-                    .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                    .forEach(e -> result.append("&c").append(e.getKey()).append(" &7x&c").append(e.getValue()).append("&7, "));
-                if (result.toString().endsWith(", ")) result.setLength(result.length() - 2);
-                result.append("\n");
-            }
-            if (!playerNames.isEmpty()) {
-                result.append("&7  [&bPlayers&7] &f");
-                for (int i = 0; i < playerNames.size(); i++) {
-                    result.append("&b").append(playerNames.get(i));
-                    if (i < playerNames.size() - 1) result.append("&7, ");
-                }
-                result.append("\n");
-            }
-            if (blockCount > 0 && incB) {
-                result.append("&7  [&aSummary&7] &f").append(blockCount).append(" blocks");
-                if (mobCount > 0) result.append(", ").append(mobCount).append(" mobs");
-                if (playerCount > 0) result.append(", ").append(playerCount).append(" player").append(playerCount > 1 ? "s" : "");
-                String topBlock = blockCounts.entrySet().stream().max(java.util.Map.Entry.comparingByValue()).map(e -> e.getKey()).orElse("air");
-                result.append(". Mostly &e").append(topBlock).append("&f.");
-                boolean hasOre = blockCounts.keySet().stream().anyMatch(k -> k.contains("ore"));
-                if (hasOre) result.append(" &aOre deposits found!");
-                result.append("\n");
-            }
-            adapter.sendMessage(player, result.toString().trim());
-            plugin.getLogger().info("[CraftyAI] SCAN_BLOCKS r=" + scanRadius + " — " + blockCount + " blocks, " + mobCount + " mobs, " + playerCount + " players");
+            plugin.getLogger().info("[CraftyAI] SCAN_BLOCKS r=" + scanRadius + " \u2014 " + blockCount + " blocks, " + mobCount + " mobs, " + playerCount + " players");
 
-            // Send scan results back to AI so it can respond with informed decisions
             StringBuilder scanCtx = new StringBuilder();
             scanCtx.append("[Block Scan Results]\n");
             scanCtx.append("Player position: ").append(bx).append(", ").append(by).append(", ").append(bz).append("\n");
@@ -472,42 +413,60 @@ public class ActionHandler {
             scanCtx.append("Radius: ").append(scanRadius).append(" blocks\n");
             if (incB && !blockCounts.isEmpty()) {
                 scanCtx.append("Blocks: ");
-                blockCounts.entrySet().stream()
-                    .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                    .forEach(e -> scanCtx.append(e.getKey()).append(" x").append(e.getValue()).append(", "));
-                if (scanCtx.charAt(scanCtx.length() - 2) == ',') scanCtx.setLength(scanCtx.length() - 2);
+                int n = 0;
+                for (Map.Entry<String, Integer> e : blockCounts.entrySet()) {
+                    if (n++ >= 12) { scanCtx.append("+").append(blockCounts.size() - 12).append(" more"); break; }
+                    if (n > 1) scanCtx.append(", ");
+                    scanCtx.append(e.getKey()).append(" x").append(e.getValue());
+                }
                 scanCtx.append("\n");
             }
             if (incE && !mobTypes.isEmpty()) {
                 scanCtx.append("Entities: ");
-                mobTypes.entrySet().stream()
-                    .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                    .forEach(e -> scanCtx.append(e.getKey()).append(" x").append(e.getValue()).append(", "));
-                if (scanCtx.charAt(scanCtx.length() - 2) == ',') scanCtx.setLength(scanCtx.length() - 2);
+                int n = 0;
+                for (Map.Entry<String, Integer> e : mobTypes.entrySet()) {
+                    if (n++ > 0) scanCtx.append(", ");
+                    scanCtx.append(e.getKey()).append(" x").append(e.getValue());
+                }
                 scanCtx.append("\n");
             }
             if (!playerNames.isEmpty()) {
                 scanCtx.append("Players nearby: ").append(String.join(", ", playerNames)).append("\n");
             }
+            scanCtx.append(com.demonz.craftyai.common.ScanFlow.privacyRules());
+
+            CraftyEngine engine = plugin.getEngine();
+            if (engine == null) {
+                adapter.sendMessage(player, "&b&l[" + aiName + "] &7> &fI tried to scan but my neural link is offline.");
+                return;
+            }
             final String scanContext = scanCtx.toString();
-            plugin.getEngine().ask(player, "Here are the scan results from my previous request. Based on this data, what do you recommend?", scanContext, null, new CraftyEngine.Callback() {
-                @Override public void onSuccess(String response) {
-                    String answer = plugin.getEngine().parseAnswer(response);
-                    if (answer != null && !answer.isEmpty()) {
-                        adapter.sendMessage(player, "&b&l[" + aiName + "] &7> &f" + answer);
-                    } else {
-                        adapter.sendMessage(player, "&b&l[" + aiName + "] &7> &f" + response);
-                    }
-                }
-                @Override public void onFailure(String error) {
-                    plugin.getLogger().warning("[CraftyAI] Scan follow-up failed: " + error);
-                }
-            });
+            engine.ask(player,
+                    com.demonz.craftyai.common.ScanFlow.followUpPrompt(originalQuestion), scanContext, null,
+                    new CraftyEngine.Callback() {
+                        @Override public void onSuccess(String response) {
+                            adapter.runEntitySync(player, () -> {
+                                if (!player.isOnline()) return;
+                                String answer = engine.parseAnswer(response);
+                                if (answer == null || answer.isEmpty()) answer = response;
+                                adapter.sendMessage(player, "&b&l[" + aiName + "] &7> &f" + answer);
+                                adapter.playSound(player, plugin.getConfig().getString("chat.sounds.success", "ENTITY_EXPERIENCE_ORB_PICKUP"), 1.0f, 1.2f);
+                            });
+                        }
+                        @Override public void onFailure(String error) {
+                            plugin.getLogger().warning("[CraftyAI] Scan follow-up failed: " + error);
+
+                            adapter.runEntitySync(player, () -> {
+                                if (!player.isOnline()) return;
+                                adapter.sendMessage(player, "&b&l[" + aiName + "] &7> &fI scanned the area, but my thoughts got scrambled on the way back. Try again in a moment.");
+                            });
+                        }
+                    });
         });
     }
 
     private void handleScheduleTask(CraftyAI plugin, Player player, String action, String playerKey) {
-        // SCHEDULE_TASK:<cron_expr>:<type>:<message>
+
         String[] parts = action.split(":", 4);
         if (parts.length < 4) {
             adapter.sendMessage(player, "&c[CraftyAI] Invalid schedule format.");
@@ -530,6 +489,7 @@ public class ActionHandler {
                 String targetUrl = com.demonz.craftyai.common.GatewayRequestHeaders.getGatewayUrl();
                 java.net.URL url = new java.net.URL(targetUrl + "/v1/schedule-task");
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(false);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
@@ -609,7 +569,6 @@ public class ActionHandler {
 
         String lowerCmd = cmd.toLowerCase();
 
-        // /locate is informational only. Teleportation requires an explicit TP action.
         if (lowerCmd.startsWith("locate structure ")) {
             final String locateCmd = cmd;
             adapter.runSync(() -> {
@@ -624,7 +583,6 @@ public class ActionHandler {
             return;
         }
 
-        // All other CHAT commands: dispatch via NMS or Bukkit
         final String finalCmd = cmd;
         adapter.runSync(() -> {
             try {
@@ -633,16 +591,12 @@ public class ActionHandler {
                 }
                 adapter.sendMessage(player, "&7[CraftyAI] Ran: /" + finalCmd);
             } catch (Exception e) {
-                plugin.getLogger().warning("[CraftyAI] CHAT command failed: " + finalCmd + " — " + e.getMessage());
+                plugin.getLogger().warning("[CraftyAI] CHAT command failed: " + finalCmd + " \u2014 " + e.getMessage());
                 adapter.sendMessage(player, "&c[CraftyAI] Command failed: " + e.getMessage());
             }
         });
     }
 
-    /**
-     * Paper API lookup for structure location. Same operation /locate uses internally.
-     * NOT entity scanning — this is a single world-gen registry lookup.
-     */
     private Location locateStructureViaAPI(Player player, String structureTypeName) {
         try {
             Class<?> structureTypeClass = Class.forName("org.bukkit.generator.structure.StructureType");
@@ -659,12 +613,6 @@ public class ActionHandler {
         return null;
     }
 
-    /**
-     * Attempts to execute a vanilla command via the NMS command dispatcher,
-     * bypassing Bukkit's CommandMap. Required for commands like /locate structure
-     * which Bukkit aliases to /locate [player].
-     * @return true if NMS dispatch succeeded, false to fall back to Bukkit
-     */
     private boolean dispatchNativeCommand(Player player, String cmd) {
         try {
             Object craftServer = Bukkit.getServer();
@@ -683,7 +631,6 @@ public class ActionHandler {
             Object commands = nmsServer.getClass().getMethod("getCommands").invoke(nmsServer);
             if (commands == null) return false;
 
-            // Find performPrefixedCommand by name + param count (not exact signature)
             java.lang.reflect.Method target = null;
             for (java.lang.reflect.Method m : commands.getClass().getMethods()) {
                 if (m.getName().equals("performPrefixedCommand") && m.getParameterCount() == 2) {
@@ -704,13 +651,6 @@ public class ActionHandler {
         }
     }
 
-    /**
-     * Normalizes /locate commands to use fully namespaced format for Bukkit compatibility.
-     * Bukkit's CommandMap intercepts "/locate" and misparses it. Using "/minecraft:locate"
-     * bypasses this. Structure/biome names also need the "minecraft:" namespace prefix.
-     * Tags like #village are kept as-is (no minecraft: prefix).
-     * Examples: "village" -> "minecraft:village", "#village" -> "#village"
-     */
     private static String normalizeLocateCommand(String cmd) {
         String lower = cmd.toLowerCase();
         if (!lower.startsWith("locate structure ") && !lower.startsWith("locate biome ") && !lower.startsWith("locate poi ")) return cmd;
@@ -720,15 +660,15 @@ public class ActionHandler {
         String rest = cmd.substring(prefixLen).trim();
         String prefix = cmd.substring(0, prefixLen);
         String restLower = rest.toLowerCase();
-        // Already namespaced: "minecraft:village" -> keep as-is
+
         if (restLower.startsWith("minecraft:")) return cmd;
-        // Tag: "#village" -> keep as-is (tags don't get namespace prefix)
+
         if (rest.startsWith("#")) return cmd;
-        // Bare "minecraft" glued to name: "minecraftvillage" -> "minecraft:village"
+
         if (restLower.startsWith("minecraft") && restLower.length() > "minecraft".length()) {
             rest = "minecraft:" + rest.substring("minecraft".length());
         }
-        // Plain name: "village" -> "minecraft:village"
+
         else {
             rest = "minecraft:" + rest;
         }
@@ -744,10 +684,6 @@ public class ActionHandler {
         "title", "worldborder", "difficulty", "xp", "experience"
     ));
 
-    /**
-     * Prefixes vanilla commands with "minecraft:" to bypass plugin overrides (e.g. Essential).
-     * Only used in the Bukkit fallback path when NMS dispatch is unavailable.
-     */
     private static String prefixVanillaCommand(String cmd) {
         String firstWord = cmd.contains(" ") ? cmd.substring(0, cmd.indexOf(' ')) : cmd;
         if (VANILLA_COMMANDS.contains(firstWord.toLowerCase())) {

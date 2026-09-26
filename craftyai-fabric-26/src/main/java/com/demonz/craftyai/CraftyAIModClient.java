@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
+import com.demonz.craftyai.common.ActionHarness;
 import com.demonz.craftyai.common.AgenticActions;
 
 import net.fabricmc.api.ClientModInitializer;
@@ -50,18 +50,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
-/**
- * CraftyAI Client Module (MC 26.x — Mojang Mappings)
- * ======================
- * Handles singleplayer AI chat and provides a config GUI.
- * When the player is on a dedicated server, the server-side mod handles everything.
- * When in singleplayer (integrated server), this client module intercepts chat.
- */
 public class CraftyAIModClient implements ClientModInitializer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("craftyai-client");
@@ -90,6 +86,12 @@ public class CraftyAIModClient implements ClientModInitializer {
 
     private final com.demonz.craftyai.common.ActionRateLimiter actionRateLimiter = new com.demonz.craftyai.common.ActionRateLimiter();
     private final com.demonz.craftyai.common.ActionConfirmation actionConfirmations = new com.demonz.craftyai.common.ActionConfirmation();
+    private static final java.util.concurrent.ScheduledThreadPoolExecutor TIMEOUTS = new java.util.concurrent.ScheduledThreadPoolExecutor(1, task -> {
+        Thread thread = new Thread(task, "craftyai-client-timeouts");
+        thread.setDaemon(true);
+        return thread;
+    });
+    static { TIMEOUTS.setRemoveOnCancelPolicy(true); }
 
     private KeyMapping settingsKey;
     private KeyMapping visionScanKey;
@@ -108,12 +110,10 @@ public class CraftyAIModClient implements ClientModInitializer {
         INSTANCE = this;
         LOGGER.info("[CraftyAI] Client module initializing...");
 
-        // Load config from the game directory
         clientConfigDir = "config";
         loadClientConfig();
         localBrain = new LocalBrain(clientConfigDir, LOGGER::info);
 
-        // Register keybinding for settings screen (M key by default)
         KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(CraftyAIMod.MOD_ID, "main"));
         settingsKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.craftyai.settings",
@@ -122,7 +122,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                 category
         ));
 
-        // Register keybinding for vision scan (V key by default)
         visionScanKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.craftyai.vision_scan",
                 InputConstants.Type.KEYSYM,
@@ -130,42 +129,22 @@ public class CraftyAIModClient implements ClientModInitializer {
                 category
         ));
 
-        // Open settings screen on keybind press + client-side welcome on first world join
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            checkActionWorld(client);
             while (settingsKey.consumeClick()) {
                 LOGGER.info("[CraftyAI] Settings key M pressed!");
-                boolean isScreenNull = true;
-                try {
-                    isScreenNull = (client.screen == null);
-                } catch (Throwable t) {
-                    try {
-                        java.lang.reflect.Field f = client.getClass().getDeclaredField("screen");
-                        f.setAccessible(true);
-                        isScreenNull = (f.get(client) == null);
-                    } catch (Throwable t2) {
-                        try {
-                            java.lang.reflect.Field f2 = client.getClass().getDeclaredField("currentScreen");
-                            f2.setAccessible(true);
-                            isScreenNull = (f2.get(client) == null);
-                        } catch (Throwable t3) {
-                            isScreenNull = true;
-                        }
-                    }
-                }
-                LOGGER.info("[CraftyAI] isScreenNull = {}", isScreenNull);
+                boolean isScreenNull = com.demonz.craftyai.common.ModernScreenAccess.current(client) == null;
                 if (isScreenNull) {
                     safeSetScreen(client, new CraftyAISettingsScreen(null));
                 }
             }
 
-            // Vision scan key — scan the block the player is looking at
             while (visionScanKey.consumeClick()) {
                 if (client.player != null && client.level != null) {
                     performVisionScan(client);
                 }
             }
 
-            // Show welcome message once per session when player enters a world
             if (!shownWelcome && client.player != null && client.level != null) {
                 shownWelcome = true;
                 if (config.op_welcome_message) {
@@ -176,7 +155,7 @@ public class CraftyAIModClient implements ClientModInitializer {
                     client.player.sendSystemMessage(Component.literal("\u00A77  Press \u00A7eM\u00A77 to open settings. Press \u00A7eV\u00A77 to vision-scan. Use \u00A7e/crafty status\u00A77 to check status."));
                     boolean hasApiKey = (config.api_key != null && !config.api_key.isEmpty() && !config.api_key.equals("YOUR_API_KEY_HERE"));
                     boolean hasCustomProvider = (config.custom_provider_enabled && config.custom_provider_url != null && !config.custom_provider_url.isEmpty());
-                    if (!hasApiKey && !hasCustomProvider) {
+                    if (config.force_local_mode || (!hasApiKey && !hasCustomProvider)) {
                         client.player.sendSystemMessage(Component.literal("\u00A7c  \u26A0 No API key or custom provider set! Press M or use /crafty apikey <key>"));
                     }
                     client.player.sendSystemMessage(Component.literal("\u00A78  Hide this: set op_welcome_message to false in config/craftyai.json"));
@@ -185,13 +164,11 @@ public class CraftyAIModClient implements ClientModInitializer {
             }
         });
 
-        // Register client-side commands
         registerClientCommands();
 
-        // Register client-side chat activation with dynamic prefixes and aliases
         ClientSendMessageEvents.ALLOW_CHAT.register((message) -> {
             net.minecraft.client.Minecraft client = net.minecraft.client.Minecraft.getInstance();
-            if (client != null && client.getCurrentServer() != null && !client.isLocalServer()) return true; // Only intercept in singleplayer
+            if (client != null && client.getCurrentServer() != null && !client.isLocalServer()) return true;
             if (message == null || message.trim().isEmpty()) return true;
             String lower = message.toLowerCase().trim();
             String prefixVal = config.prefix != null ? config.prefix : "@";
@@ -201,24 +178,29 @@ public class CraftyAIModClient implements ClientModInitializer {
             for (String alias : aliasesList) {
                 String prefixed = prefixVal.toLowerCase() + alias;
                 if (lower.startsWith(prefixed + " ")) {
+                    if (client != null && client.player != null) {
+                        client.player.sendSystemMessage(Component.literal("<" + client.player.getName().getString() + "> " + message));
+                    }
                     String question = message.trim().substring(prefixed.length()).trim();
                     if (!question.isEmpty()) {
                         handleClientChatDirect(question);
                     }
-                    return false; // Cancel the original chat message
+                    return false;
                 }
                 if (!requirePrefix && lower.startsWith(alias + " ")) {
+                    if (client != null && client.player != null) {
+                        client.player.sendSystemMessage(Component.literal("<" + client.player.getName().getString() + "> " + message));
+                    }
                     String question = message.trim().substring(alias.length()).trim();
                     if (!question.isEmpty()) {
                         handleClientChatDirect(question);
                     }
-                    return false; // Cancel the original chat message
+                    return false;
                 }
             }
-            return true; // Let other messages through
+            return true;
         });
 
-        // Reset shownWelcome on disconnect so it shows again when joining a new world
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             shownWelcome = false;
             conversationCache.clear();
@@ -230,9 +212,6 @@ public class CraftyAIModClient implements ClientModInitializer {
         LOGGER.info("[CraftyAI] Client module ready. Press M for settings, V for vision scan. Type @{} in chat.", firstAlias);
     }
 
-    /**
-     * Perform a vision scan of the block the player is looking at.
-     */
     private void performVisionScan(Minecraft client) {
         long now = System.currentTimeMillis();
         if (now - lastVisionScanTime < VISION_SCAN_COOLDOWN_MS) {
@@ -246,22 +225,17 @@ public class CraftyAIModClient implements ClientModInitializer {
             var blockPos = blockHit.getBlockPos();
             var blockState = client.level.getBlockState(blockPos);
             String blockName = blockState.getBlock().getName().getString();
-            client.player.sendSystemMessage(Component.literal("\u00A7b\u00A7l[CraftyAI Vision Scan] \u00A77Scanning: \u00A7f" + blockName + " \u00A78at " + blockPos.toShortString()));
+            client.player.sendSystemMessage(Component.literal("\u00A7b\u00A7l[CraftyAI Vision Scan] \u00A77Scanning: \u00A7f" + blockName));
             client.player.sendSystemMessage(Component.literal("\u00A77Analyzing with AI..."));
 
-            // Build vision context and send to AI
             StringBuilder visionCtx = new StringBuilder();
             visionCtx.append("[Vision Scan]\n");
             visionCtx.append("Block: ").append(blockName).append("\n");
-            visionCtx.append("Position: ").append(blockPos.toShortString()).append("\n");
-            if (client.level != null) {
-                visionCtx.append("Biome: ").append(client.level.getBiome(blockPos).unwrapKey().map(k -> k.identifier().getPath()).orElse("unknown")).append("\n");
-            }
 
             String question = "I'm looking at a " + blockName + " block. What is it useful for in Minecraft? Any tips?";
             handleClientChat(null, question, visionCtx.toString());
 
-            LOGGER.info("[CraftyAI] Vision scan sent to AI: {} at {}", blockName, blockPos.toShortString());
+            LOGGER.info("[CraftyAI] Vision scan sent to AI: {}", blockName);
         } else if (hit != null && hit.getType() == HitResult.Type.ENTITY) {
             net.minecraft.world.entity.Entity entity = ((net.minecraft.world.phys.EntityHitResult) hit).getEntity();
             String entityName = entity.getName().getString();
@@ -278,9 +252,10 @@ public class CraftyAIModClient implements ClientModInitializer {
     }
 
     private void performStartupHandshake() {
-        // Skip handshake if custom provider is enabled
+        if (config == null || config.force_local_mode || !config.telemetry_enabled) return;
+
         if (config.custom_provider_enabled) {
-            LOGGER.info("[CraftyAI] Custom provider enabled — skipping gateway handshake.");
+            LOGGER.info("[CraftyAI] Custom provider enabled \u2014 skipping gateway handshake.");
             return;
         }
 
@@ -288,7 +263,7 @@ public class CraftyAIModClient implements ClientModInitializer {
 
         CompletableFuture.runAsync(() -> {
             try {
-                // Determine server name for handshake
+
                 String serverName = "";
                 Minecraft mc = Minecraft.getInstance();
                 if (mc != null) {
@@ -306,9 +281,9 @@ public class CraftyAIModClient implements ClientModInitializer {
                     .uri(URI.create(GatewayRequestHeaders.getGatewayUrl() + "/v1/handshake"))
                     .header("Content-Type", "application/json")
                     .timeout(Duration.ofSeconds(10))
-                    .POST(HttpRequest.BodyPublishers.ofString(json)), CLIENT_TYPE, sid)
+                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)), CLIENT_TYPE, sid)
                     .build();
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {
                     try {
                         com.google.gson.JsonObject resJson = com.demonz.craftyai.common.JsonParserAdapter.parse(response.body()).getAsJsonObject();
@@ -323,7 +298,7 @@ public class CraftyAIModClient implements ClientModInitializer {
                                 net.minecraft.client.Minecraft.getInstance().execute(() -> {
                                     if (net.minecraft.client.Minecraft.getInstance().player != null) {
                                         net.minecraft.client.Minecraft.getInstance().player.sendSystemMessage(
-                                            Component.literal("§c§l[CraftyAI Warning] §7" + message));
+                                            Component.literal("\u00A7c\u00A7l[CraftyAI Warning] \u00A77" + message));
                                     }
                                 });
                             }
@@ -359,10 +334,10 @@ public class CraftyAIModClient implements ClientModInitializer {
                     .header("X-Session-Id", sid)
                     .header("X-Server-ID", sid)
                     .timeout(Duration.ofSeconds(10))
-                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                     .build();
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                LOGGER.info("[CraftyAI] Auto-mint response: {} -> {}", response.statusCode(), response.body());
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                LOGGER.info("[CraftyAI] Auto-mint response: HTTP {}", response.statusCode());
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {
                     com.google.gson.JsonObject res = com.demonz.craftyai.common.JsonParserAdapter.parse(response.body()).getAsJsonObject();
                     if (res.has("api_key")) {
@@ -449,7 +424,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                         })
                     );
 
-                // Add apikey, key, & api subcommands with 0-arg and 1-arg execution
                 for (String keyLiteral : new String[]{"apikey", "key", "api"}) {
                     tree.then(ClientCommands.literal(keyLiteral)
                         .executes(ctx -> {
@@ -476,7 +450,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                     );
                 }
 
-                // Add mint & automint subcommands
                 for (String mintLiteral : new String[]{"mint", "automint"}) {
                     tree.then(ClientCommands.literal(mintLiteral)
                         .executes(ctx -> {
@@ -487,7 +460,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                     );
                 }
 
-                // Add settings, gui, config subcommands
                 for (String settingsLiteral : new String[]{"settings", "gui", "config"}) {
                     tree.then(ClientCommands.literal(settingsLiteral)
                         .executes(ctx -> {
@@ -498,7 +470,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                     );
                 }
 
-                // Add ask subcommand
                 tree.then(ClientCommands.literal("ask")
                     .then(ClientCommands.argument("question", StringArgumentType.greedyString())
                         .executes(ctx -> {
@@ -509,7 +480,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                     )
                 );
 
-                // Add scan & vision subcommands
                 for (String scanLiteral : new String[]{"scan", "vision"}) {
                     tree.then(ClientCommands.literal(scanLiteral)
                         .executes(ctx -> {
@@ -522,17 +492,29 @@ public class CraftyAIModClient implements ClientModInitializer {
                     );
                 }
 
-                // Add confirm subcommand
+                tree.then(ClientCommands.literal("cancel")
+                    .executes(ctx -> {
+                        chatGeneration++;
+                        cancelActiveRun();
+                        var client = Minecraft.getInstance();
+                        if (client.player != null) {
+                            actionConfirmations.cancel(client.player.getUUID().toString());
+                            client.player.sendSystemMessage(Component.literal("[CraftyAI] Task cancelled. No further actions will run."));
+                        }
+                        return 1;
+                    })
+                );
+
                 tree.then(ClientCommands.literal("confirm")
                     .executes(ctx -> {
                         Minecraft client = Minecraft.getInstance();
                         if (client.player == null) return 0;
                         String playerKey = client.player.getUUID().toString();
-                        String pending = actionConfirmations.peek(playerKey);
+                        String pending = actionConfirmations.confirm(playerKey);
                         if (pending == null) {
                             ctx.getSource().sendFeedback(Component.literal("\u00A77[CraftyAI] No destructive action pending."));
                         } else {
-                            ctx.getSource().sendFeedback(Component.literal("\u00A7a[CraftyAI] Confirmed pending action: \u00A7f" + pending.toUpperCase() + "\u00A7a. Re-run your request to execute it now."));
+                            resumeConfirmedAction(pending);
                         }
                         return 1;
                     })
@@ -573,6 +555,13 @@ public class CraftyAIModClient implements ClientModInitializer {
             return;
         }
         lastChatTime = now;
+        cancelActiveRun();
+        final long requestGeneration = ++chatGeneration;
+        final var requestClient = Minecraft.getInstance();
+        final var requestPlayer = requestClient.player;
+        final var requestWorld = requestClient.level;
+        if (requestPlayer == null || requestWorld == null) return;
+        final String requestPlayerName = requestPlayer.getName().getString();
 
         String sid = com.demonz.craftyai.common.SessionManager.getSessionId(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir());
 
@@ -588,16 +577,20 @@ public class CraftyAIModClient implements ClientModInitializer {
         }
 
         final String finalContext = context;
-        CompletableFuture.supplyAsync(() -> sendAIRequest(question, mc.player.getName().getString(), finalContext, historyJson))
+        CompletableFuture.supplyAsync(() -> sendAIRequest(question, requestPlayerName, finalContext, historyJson))
             .thenAccept(responseBody -> {
                 mc.execute(() -> {
+                    if (requestGeneration != chatGeneration || requestClient.player != requestPlayer || requestClient.level != requestWorld) return;
                     if (mc.player == null) return;
                     if (responseBody != null && responseBody.startsWith("__ERROR__:")) {
-                        // Structured error from gateway
+
                         String errorMsg = responseBody.substring("__ERROR__:".length());
                         mc.player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] " + errorMsg));
                     } else if (responseBody != null) {
-                        NeuralResponse res = GSON.fromJson(responseBody, NeuralResponse.class);
+                        NeuralResponse res;
+                        try { res = GSON.fromJson(responseBody, NeuralResponse.class); }
+                        catch (Exception invalid) { requestPlayer.sendSystemMessage(Component.literal("[CraftyAI] Invalid AI response. No action was run.")); return; }
+                        if (res == null) return;
                         String answer = res != null ? res.getAnswer() : null;
                         String action = res != null ? res.getAction() : null;
                         if (action == null || action.isEmpty() || "null".equalsIgnoreCase(action)) {
@@ -605,63 +598,12 @@ public class CraftyAIModClient implements ClientModInitializer {
                         } else if (action.toUpperCase().startsWith("SCHEDULE_TASK:") && question != null && question.toLowerCase().matches(".*\\b(in|after|wait)\\s+\\d+\\s*(seconds?|sec|minutes?|min)\\b.*")) {
                             action = inferActionFromText(answer, question);
                         }
-                        if (answer != null && !answer.isEmpty()) {
+                        boolean hasAction = action != null && !action.isEmpty() && !action.equalsIgnoreCase("null");
+                        if (hasAction) {
+                            runActionHarness(action, question, answer, finalContext, historyJson, false);
+                        } else if (answer != null && !answer.isEmpty()) {
                             addToHistory(playerId, question, answer);
-                            String actionUpper = action != null ? action.toUpperCase().trim() : "";
-                            boolean hasAction = action != null && !action.isEmpty() && !action.equalsIgnoreCase("null");
-                            boolean isSelfFeedback = hasAction && (actionUpper.startsWith("SCAN_BLOCKS") || actionUpper.startsWith("DELAYED_ACTION") || actionUpper.startsWith("SCHEDULE_TASK"));
-
-                            if (hasAction && !isSelfFeedback) {
-                                executeAction(action);
-                                final String actionForFollowUp = action;
-                                final String originalQuestion = question;
-                                final String playerNameStr = mc.player.getName().getString();
-                                final String worldStr = mc.level.dimension().identifier().toString();
-                                final String bgCtx = buildContext(mc.player);
-                                final String aiNameFinal = config.ai_name != null ? config.ai_name : "Crafty";
-                                final String answerFinal = answer;
-                                Thread fbThread = new Thread(() -> {
-                                    try {
-                                        String actionContext = "[Action Executed]\nAction: " + actionForFollowUp + "\nPlayer: " + playerNameStr + "\nWorld: " + worldStr;
-                                        String fullQuestion = "The player asked: \"" + originalQuestion + "\". The action \"" + actionForFollowUp + "\" was executed. Respond naturally in 1-2 sentences confirming what was done. Be conversational and brief. Do NOT output action codes or technical details.\n\n" + actionContext;
-                                        java.util.LinkedList<java.util.Map<String, String>> followUpHist = conversationCache.computeIfAbsent(playerId, k -> new java.util.LinkedList<>());
-                                        String followUpHistoryJson = buildHistoryJson(followUpHist);
-                                        String followUpResponse = sendAIRequest(fullQuestion, playerNameStr, bgCtx, followUpHistoryJson);
-                                        if (followUpResponse != null && !followUpResponse.startsWith("__ERROR__:")) {
-                                            NeuralResponse followUpRes = GSON.fromJson(followUpResponse, NeuralResponse.class);
-                                            String followUp = followUpRes != null ? followUpRes.getAnswer() : null;
-                                            if (followUp != null && !followUp.isEmpty()) {
-                                                mc.execute(() -> {
-                                                    if (mc.player != null) {
-                                                        mc.player.sendSystemMessage(Component.literal("\u00A7b[" + aiNameFinal + "] \u00A77> \u00A7f" + followUp));
-                                                        addToHistory(playerId, "(action follow-up)", followUp);
-                                                    }
-                                                });
-                                            }
-                                        } else {
-                                            mc.execute(() -> {
-                                                if (mc.player != null) {
-                                                    mc.player.sendSystemMessage(Component.literal("\u00A7b[" + aiNameFinal + "] \u00A77> \u00A7f" + answerFinal));
-                                                }
-                                            });
-                                        }
-                                    } catch (Exception e) {
-                                        LOGGER.warn("[CraftyAI] Action follow-up failed: " + e.getMessage());
-                                        mc.execute(() -> {
-                                            if (mc.player != null) {
-                                                mc.player.sendSystemMessage(Component.literal("\u00A7b[" + aiNameFinal + "] \u00A77> \u00A7f" + answerFinal));
-                                            }
-                                        });
-                                    }
-                                }, "CraftyAI-ActionFeedback");
-                                fbThread.setDaemon(true);
-                                fbThread.start();
-                            } else {
-                                mc.player.sendSystemMessage(Component.literal("\u00A7b[" + config.ai_name + "] \u00A77> \u00A7f" + answer));
-                                if (hasAction) {
-                                    executeAction(action);
-                                }
-                            }
+                            Minecraft.getInstance().player.sendSystemMessage(Component.literal("\u00A7b[" + config.ai_name + "] \u00A77> \u00A7f" + answer));
                         } else {
                             mc.player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Got an empty response."));
                         }
@@ -670,7 +612,7 @@ public class CraftyAIModClient implements ClientModInitializer {
                         String localAnswer = this.localBrain.generateOfflineResponse(question, playerName);
                         if (localAnswer != null) {
                             mc.player.sendSystemMessage(Component.literal("\u00A7b[" + config.ai_name + "] \u00A77> \u00A7f" + localAnswer));
-                            // Enqueue for later processing
+
                             this.localBrain.enqueueRequest(question, playerName, "Offline from Client Chat");
                         } else {
                             mc.player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Could not reach the AI. Connection is offline."));
@@ -685,57 +627,47 @@ public class CraftyAIModClient implements ClientModInitializer {
         try {
             Minecraft mc = Minecraft.getInstance();
 
-            // --- PERMISSIONS ---
             ctx.append("[PERMISSIONS]\n");
-            
-            // Gamemode
+
             String gameMode = "unknown";
             if (mc.gameMode != null) {
                 gameMode = mc.gameMode.getPlayerMode().getName();
             }
             ctx.append("GameMode: ").append(gameMode).append("\n");
-            
-            // OP status — works for both singleplayer (cheats) and multiplayer (OP)
+
             boolean hasOp = player.canUseGameMasterBlocks();
-            ctx.append("OP Status: ").append(hasOp ? "YES — has operator permissions" : "NO — does NOT have OP permissions").append("\n");
-            
-            // World type detection
+            ctx.append("OP Status: ").append(hasOp ? "YES \u2014 has operator permissions" : "NO \u2014 does NOT have OP permissions").append("\n");
+
             boolean isSingleplayer = mc.hasSingleplayerServer();
             ctx.append("World Type: ").append(isSingleplayer ? "singleplayer" : "multiplayer").append("\n");
-            
-            // Cheats — in singleplayer, check if commands are allowed
-            boolean cheatsEnabled = hasOp; // On multiplayer, OP = cheats
+
+            boolean cheatsEnabled = hasOp;
             if (isSingleplayer && mc.getSingleplayerServer() != null) {
-                // In singleplayer, the integrated server manages this
+
                 cheatsEnabled = mc.getSingleplayerServer().getPlayerList().isAllowCommandsForAllPlayers();
             }
             ctx.append("Cheats: ").append(cheatsEnabled ? "enabled" : "disabled").append("\n");
-            
-            // Flying
+
             ctx.append("Can Fly: ").append(player.getAbilities().mayfly ? "yes" : "no").append("\n");
-            
-            // Difficulty
+
             if (mc.level != null) {
                 ctx.append("Difficulty: ").append(mc.level.getDifficulty().name().toLowerCase()).append("\n");
             }
             ctx.append("\n");
 
-            // --- ENVIRONMENT ---
             ctx.append("[ENVIRONMENT]\n");
             if (mc.level != null) {
                 ctx.append("Dimension: ").append(mc.level.dimension().identifier().getPath()).append("\n");
                 long time = mc.level.getDefaultClockTime() % 24000;
                 String timeOfDay = time < 6000 ? "Morning" : time < 12000 ? "Day" : time < 18000 ? "Evening" : "Night";
                 ctx.append("Time: ").append(timeOfDay).append("\n");
-                
-                // Weather
+
                 boolean raining = mc.level.isRaining();
                 boolean thundering = mc.level.isThundering();
                 ctx.append("Weather: ").append(thundering ? "thunderstorm" : raining ? "rain" : "clear").append("\n");
             }
             ctx.append("\n");
 
-            // --- PLAYER STATUS ---
             ctx.append("[PLAYER STATUS]\n");
             ctx.append("Health: ").append((int) player.getHealth()).append("/").append((int) player.getMaxHealth()).append("\n");
             ctx.append("Food: ").append(player.getFoodData().getFoodLevel()).append("/20\n");
@@ -744,7 +676,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                .append(",").append(player.blockPosition().getY())
                .append(",").append(player.blockPosition().getZ()).append("\n");
 
-            // Active effects
             if (!player.getActiveEffects().isEmpty()) {
                 ctx.append("Active Effects: ");
                 player.getActiveEffects().forEach(effect -> {
@@ -763,117 +694,11 @@ public class CraftyAIModClient implements ClientModInitializer {
     }
 
     private void handleClientChat(FabricClientCommandSource source, String question) {
-        boolean hasApiKey = (config.api_key != null && !config.api_key.isEmpty() && !config.api_key.equals("YOUR_API_KEY_HERE"));
-        boolean hasCustomProvider = (config.custom_provider_enabled && config.custom_provider_url != null && !config.custom_provider_url.isEmpty());
-        if (!hasApiKey && !hasCustomProvider) {
-            source.sendFeedback(Component.literal("\u00A7c[CraftyAI] API key or custom provider not set. Use /craftyclient apikey <key> or press M to open settings."));
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        if (now - lastChatTime < config.getCooldownMs()) {
-            source.sendFeedback(Component.literal("\u00A7c[CraftyAI] Please wait before asking again."));
-            return;
-        }
-        lastChatTime = now;
-
-        source.sendFeedback(Component.literal("\u00A7b[" + config.ai_name + "] \u00A77Thinking..."));
-
-        String sid = com.demonz.craftyai.common.SessionManager.getSessionId(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir());
-
-        UUID playerId = source.getPlayer().getUUID();
-        LinkedList<Map<String, String>> history = conversationCache.computeIfAbsent(playerId, k -> new LinkedList<>());
-        String historyJson = buildHistoryJson(history);
-
-        String context = buildContext(source.getPlayer());
-
-        CompletableFuture.supplyAsync(() -> sendAIRequest(question, source.getPlayer().getName().getString(), context, historyJson))
-            .thenAccept(responseBody -> {
-                Minecraft.getInstance().execute(() -> {
-                    if (responseBody != null && responseBody.startsWith("__ERROR__:")) {
-                        String errorMsg = responseBody.substring("__ERROR__:".length());
-                        source.sendFeedback(Component.literal("\u00A7c[CraftyAI] " + errorMsg));
-                    } else if (responseBody != null) {
-                        NeuralResponse res = GSON.fromJson(responseBody, NeuralResponse.class);
-                        String answer = res != null ? res.getAnswer() : null;
-                        String action = res != null ? res.getAction() : null;
-                        if (action == null || action.isEmpty() || "null".equalsIgnoreCase(action)) {
-                            action = inferActionFromText(answer, question);
-                        } else if (action.toUpperCase().startsWith("SCHEDULE_TASK:") && question != null && question.toLowerCase().matches(".*\\b(in|after|wait)\\s+\\d+\\s*(seconds?|sec|minutes?|min)\\b.*")) {
-                            action = inferActionFromText(answer, question);
-                        }
-                        if (answer != null && !answer.isEmpty()) {
-                            addToHistory(playerId, question, answer);
-                            String actionUpper = action != null ? action.toUpperCase().trim() : "";
-                            boolean hasAction = action != null && !action.isEmpty() && !action.equalsIgnoreCase("null");
-                            boolean isSelfFeedback = hasAction && (actionUpper.startsWith("SCAN_BLOCKS") || actionUpper.startsWith("DELAYED_ACTION") || actionUpper.startsWith("SCHEDULE_TASK"));
-
-                            if (hasAction && !isSelfFeedback) {
-                                executeAction(action);
-                                final String actionForFollowUp = action;
-                                final String originalQuestion = question;
-                                final String playerNameStr = source.getPlayer().getName().getString();
-                                final String worldStr = source.getPlayer().level().dimension().identifier().toString();
-                                final String bgCtx = buildContext(source.getPlayer());
-                                final String aiNameFinal = config.ai_name != null ? config.ai_name : "Crafty";
-                                final String answerFinal = answer;
-                                Thread fbThread2 = new Thread(() -> {
-                                    try {
-                                        String actionContext = "[Action Executed]\nAction: " + actionForFollowUp + "\nPlayer: " + playerNameStr + "\nWorld: " + worldStr;
-                                        String fullQuestion = "The player asked: \"" + originalQuestion + "\". The action \"" + actionForFollowUp + "\" was executed. Respond naturally in 1-2 sentences confirming what was done. Be conversational and brief. Do NOT output action codes or technical details.\n\n" + actionContext;
-                                        java.util.LinkedList<java.util.Map<String, String>> followUpHist = conversationCache.computeIfAbsent(playerId, k -> new java.util.LinkedList<>());
-                                        String followUpHistoryJson = buildHistoryJson(followUpHist);
-                                        String followUpResponse = sendAIRequest(fullQuestion, playerNameStr, bgCtx, followUpHistoryJson);
-                                        if (followUpResponse != null && !followUpResponse.startsWith("__ERROR__:")) {
-                                            NeuralResponse followUpRes = GSON.fromJson(followUpResponse, NeuralResponse.class);
-                                            String followUp = followUpRes != null ? followUpRes.getAnswer() : null;
-                                            if (followUp != null && !followUp.isEmpty()) {
-                                                Minecraft.getInstance().execute(() -> {
-                                                    if (Minecraft.getInstance().player != null) {
-                                                        source.sendFeedback(Component.literal("\u00A7b[" + aiNameFinal + "] \u00A77> \u00A7f" + followUp));
-                                                        addToHistory(playerId, "(action follow-up)", followUp);
-                                                    }
-                                                });
-                                            }
-                                        } else {
-                                            Minecraft.getInstance().execute(() -> {
-                                                source.sendFeedback(Component.literal("\u00A7b[" + aiNameFinal + "] \u00A77> \u00A7f" + answerFinal));
-                                            });
-                                        }
-                                    } catch (Exception e) {
-                                        LOGGER.warn("[CraftyAI] Action follow-up failed: " + e.getMessage());
-                                        Minecraft.getInstance().execute(() -> {
-                                            source.sendFeedback(Component.literal("\u00A7b[" + aiNameFinal + "] \u00A77> \u00A7f" + answerFinal));
-                                        });
-                                    }
-                                }, "CraftyAI-ActionFeedback");
-                                fbThread2.setDaemon(true);
-                                fbThread2.start();
-                            } else {
-                                source.sendFeedback(Component.literal("\u00A7b[" + config.ai_name + "] \u00A77> \u00A7f" + answer));
-                                if (hasAction) {
-                                    executeAction(action);
-                                }
-                            }
-                        } else {
-                            source.sendFeedback(Component.literal("\u00A7c[CraftyAI] Got an empty response. Try again."));
-                        }
-                    } else {
-                        String playerName = net.minecraft.client.Minecraft.getInstance().getUser().getName();
-                        String localAnswer = CraftyAIModClient.this.localBrain.generateOfflineResponse(question, playerName);
-                        if (localAnswer != null) {
-                            source.sendFeedback(Component.literal("\u00A7b[" + config.ai_name + "] \u00A7e[OFFLINE] \u00A77> \u00A7f" + localAnswer));
-                            CraftyAIModClient.this.localBrain.enqueueRequest(question, playerName, "Offline from Client");
-                        } else {
-                            source.sendFeedback(Component.literal("\u00A7c[CraftyAI] Could not reach the AI. Connection is offline."));
-                        }
-                    }
-                });
-            });
+        handleClientChatDirect(question);
     }
 
     private void handleClientChat(Object source, String question, String extraContext) {
-        // Delegate to the main handler with extra vision context appended
+
         handleClientChatDirect(question, extraContext);
     }
 
@@ -883,29 +708,15 @@ public class CraftyAIModClient implements ClientModInitializer {
     }
 
     private static String normalizeLocateCommand(String cmd) {
-        String lower = cmd.toLowerCase();
-        if (!lower.startsWith("locate structure ") && !lower.startsWith("locate biome ") && !lower.startsWith("locate poi ")) return cmd;
-        int prefixLen = lower.startsWith("locate structure ") ? "locate structure ".length()
-                       : lower.startsWith("locate biome ") ? "locate biome ".length()
-                       : "locate poi ".length();
-        String rest = cmd.substring(prefixLen).trim();
-        String prefix = cmd.substring(0, prefixLen);
-        String restLower = rest.toLowerCase();
-        if (restLower.startsWith("minecraft:")) return cmd;
-        if (restLower.startsWith("minecraft") && restLower.length() > "minecraft".length()) {
-            rest = "minecraft:" + rest.substring("minecraft".length());
-        } else {
-            rest = "minecraft:" + rest;
-        }
-        return prefix + rest;
+        return AgenticActions.normalizeLocateCommand(cmd);
     }
 
     private String sendAIRequest(String question, String playerName, String context, String historyJson) {
         try {
             final CraftyAIConfig cfg = config;
+            if (cfg.force_local_mode) return null;
             String sid = com.demonz.craftyai.common.SessionManager.getSessionId(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir());
 
-            // Use effective API URL and key from config (supports custom provider)
             String effectiveUrl = cfg.getEffectiveApiUrl();
             String effectiveKey = cfg.getEffectiveApiKey();
 
@@ -913,7 +724,7 @@ public class CraftyAIModClient implements ClientModInitializer {
             HttpRequest.Builder requestBuilder;
 
             if (cfg.custom_provider_enabled) {
-                // chat-completions-compatible provider: use /v1/chat/completions with messages array
+
                 List<Map<String, String>> messages = new ArrayList<>();
                 Map<String, String> systemMsg = new HashMap<>();
                 systemMsg.put("role", "system");
@@ -921,7 +732,6 @@ public class CraftyAIModClient implements ClientModInitializer {
                         (context != null && !context.isEmpty() ? "\n\nContext:\n" + context : ""));
                 messages.add(systemMsg);
 
-                // Parse history and add to messages
                 try {
                     com.google.gson.JsonArray historyArray = com.demonz.craftyai.common.JsonParserAdapter.parse(historyJson).getAsJsonArray();
                     for (com.google.gson.JsonElement elem : historyArray) {
@@ -955,12 +765,11 @@ public class CraftyAIModClient implements ClientModInitializer {
                     .uri(URI.create(chatUrl + "/v1/chat/completions"))
                     .header("Content-Type", "application/json")
                     .timeout(Duration.ofSeconds(30))
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload));
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload, StandardCharsets.UTF_8));
 
-                // Apply custom provider headers (no gateway-specific headers)
                 GatewayHttpClientHelper.applyCustomProvider(requestBuilder, effectiveUrl, effectiveKey, CLIENT_TYPE, sid);
             } else {
-                // CraftyAI Gateway: use /v1/chat with gateway payload format
+
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("prompt", question);
                 payload.put("player_name", playerName);
@@ -983,16 +792,15 @@ public class CraftyAIModClient implements ClientModInitializer {
                     .header("Authorization", "Bearer " + effectiveKey)
                     .header("Content-Type", "application/json")
                     .timeout(Duration.ofSeconds(30))
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload));
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload, StandardCharsets.UTF_8));
 
-                // Apply gateway headers
                 GatewayHttpClientHelper.apply(requestBuilder, CLIENT_TYPE, sid);
             }
 
-            HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 if (cfg.custom_provider_enabled) {
-                    // Parse chat-completions-compatible response and wrap in NeuralResponse format
+
                     try {
                         com.google.gson.JsonObject json = com.demonz.craftyai.common.JsonParserAdapter.parse(response.body()).getAsJsonObject();
                         com.google.gson.JsonArray choices = json.getAsJsonArray("choices");
@@ -1012,9 +820,9 @@ public class CraftyAIModClient implements ClientModInitializer {
                 }
                 return response.body();
             }
-            // Return structured error info for the caller to display
+
             int code = response.statusCode();
-            LOGGER.warn("[CraftyAI] API returned HTTP {}: {}", code, response.body());
+            LOGGER.warn("[CraftyAI] API returned HTTP {}", code);
             if (code == 401 || code == 403) {
                 try {
                     String body = response.body();
@@ -1063,8 +871,6 @@ public class CraftyAIModClient implements ClientModInitializer {
         }
     }
 
-    // --- Utilities ---
-
     private void addToHistory(UUID playerId, String question, String answer) {
         LinkedList<Map<String, String>> history = conversationCache.computeIfAbsent(playerId, k -> new LinkedList<>());
         synchronized (history) {
@@ -1078,7 +884,7 @@ public class CraftyAIModClient implements ClientModInitializer {
             history.add(aiMsg);
             while (history.size() > MAX_HISTORY) history.removeFirst();
         }
-        // Cap total cache size to prevent unbounded memory growth
+
         if (conversationCache.size() > MAX_CACHED_PLAYERS) {
             Iterator<UUID> it = conversationCache.keySet().iterator();
             while (conversationCache.size() > MAX_CACHED_PLAYERS && it.hasNext()) {
@@ -1094,379 +900,305 @@ public class CraftyAIModClient implements ClientModInitializer {
         }
     }
 
-    private void executeAction(String actionString) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.getConnection() == null) return;
+    private void requestScanSummary(String originalQuestion, String scanContext) {
+        Minecraft client = Minecraft.getInstance();
+        final net.minecraft.client.player.LocalPlayer player = client.player;
+        final net.minecraft.client.multiplayer.ClientLevel world = client.level;
+        if (player == null || world == null) return;
+        final String playerName = player.getName().getString();
+        final String context = scanContext + com.demonz.craftyai.common.ScanFlow.privacyRules();
+        final String prompt = com.demonz.craftyai.common.ScanFlow.followUpPrompt(originalQuestion);
 
-        // Agentic tasks are FREE for all tiers.
-        // No tier check. Only config + OP/cheats gates remain.
-
-        if (!config.agentic_tasks_enabled || !config.ai_enable_actions) {
-            mc.player.sendSystemMessage(Component.literal("\u00A78[\u00A7bCraftyAI\u00A78] \u00A77Action suggested: \u00A7e" + actionString + " \u00A78(agentic tasks disabled in config)"));
-            LOGGER.info("[CraftyAI] Skipped agentic action {} — agentic tasks disabled in config", actionString);
-            return;
-        }
-
-        // Client-side: actions require cheats/OP — warn if not available
-        if (!mc.player.canUseGameMasterBlocks()) {
-            mc.player.sendSystemMessage(Component.literal("\u00A78[\u00A7bCraftyAI\u00A78] \u00A77Action suggested: \u00A7e" + actionString + " \u00A78(requires OP/cheats)"));
-            LOGGER.info("[CraftyAI] Skipped action {} — player lacks OP/cheats", actionString);
-            return;
-        }
-
-        String playerKey = mc.player.getUUID().toString();
-        if (!actionRateLimiter.tryAcquire(playerKey)) {
-            long sec = actionRateLimiter.secondsUntilReset(playerKey);
-            mc.player.sendSystemMessage(Component.literal("§c§o[Rate limit: try again in " + sec + "s]"));
-            return;
-        }
-
-        String[] actions = actionString.split("\\|");
-        for (String action : actions) {
-            String upper = action.toUpperCase().trim();
-            if (upper.isEmpty()) continue;
-
-            // Safety confirmation flow on client-side
-            com.demonz.craftyai.common.AgenticActions.Risk risk = com.demonz.craftyai.common.AgenticActions.riskFor(action);
-            if (risk == com.demonz.craftyai.common.AgenticActions.Risk.DESTRUCTIVE && (config == null || config.require_confirmation)) {
-                String confirmed = actionConfirmations.confirm(playerKey);
-                if (confirmed == null || !confirmed.equalsIgnoreCase(upper)) {
-                    actionConfirmations.request(playerKey, action);
-                    mc.player.sendSystemMessage(Component.literal("§c§o⚠ Destructive action: §f" + upper + " §c§o— run §e/craftyclient confirm §c§owithin 30s to execute."));
-                    continue;
-                }
-            }
-
-            String command = null;
-            String feedback = null;
-
-            switch (upper) {
-            case "TIME_DAY":
-                command = "time set day";
-                feedback = "\u00A7e\u2600 Time set to day";
-                break;
-            case "TIME_NIGHT":
-                command = "time set night";
-                feedback = "\u00A79\u263D Time set to night";
-                break;
-            case "WEATHER_CLEAR":
-                command = "weather clear";
-                feedback = "\u00A7a\u2600 Weather cleared";
-                break;
-            case "WEATHER_RAIN":
-                command = "weather rain";
-                feedback = "\u00A79\u2602 Weather set to rain";
-                break;
-            case "WEATHER_THUNDER":
-                command = "weather thunder";
-                feedback = "\u00A7c\u26A1 Thunderstorm activated";
-                break;
-            case "HEAL":
-                command = "effect give @s minecraft:instant_health 1 255";
-                feedback = "\u00A7a\u2764 Healed!";
-                break;
-            case "FEED":
-                command = "effect give @s minecraft:saturation 1 255";
-                feedback = "\u00A76\u2615 Fully fed!";
-                break;
-            case "KILL_MOBS":
-                command = "kill @e[type=!player,distance=..50,type=!item,type=!xp_orb]";
-                feedback = "\u00A7c\u2620 Nearby hostile mobs eliminated";
-                break;
-            case "TELEPORT_SPAWN":
-                command = "tp @s 0 64 0";
-                feedback = "\u00A7d\u2728 Teleporting to spawn...";
-                break;
-            case "GAMEMODE_CREATIVE":
-                command = "gamemode creative";
-                feedback = "\u00A7b\u2726 Switched to Creative mode";
-                break;
-            case "GAMEMODE_SURVIVAL":
-                command = "gamemode survival";
-                feedback = "\u00A7a\u2694 Switched to Survival mode";
-                break;
-            case "GAMEMODE_SPECTATOR":
-                command = "gamemode spectator";
-                feedback = "\u00A77\u2639 Switched to Spectator mode";
-                break;
-            default:
-                // Handle SCAN_BLOCKS
-                if (action.toUpperCase().startsWith("SCAN_BLOCKS:")) {
-                    String[] parts = action.split(":");
-                    int radius = 8;
-                    try {
-                        if (parts.length >= 2) radius = Math.min(32, Math.max(1, Integer.parseInt(parts[1].trim())));
-                    } catch (NumberFormatException ignored) {}
-                    boolean includePlayers = parts.length >= 3 && "1".equals(parts[2]);
-                    boolean includeEntities = parts.length >= 4 && "1".equals(parts[3]);
-                    boolean includeBlocks = parts.length >= 5 && "1".equals(parts[4]);
-                    if (!includeBlocks && !includeEntities && !includePlayers) {
-                        includeBlocks = true; includeEntities = true;
-                    }
-                    net.minecraft.core.BlockPos playerPos = mc.player.blockPosition();
-                    int blockCount = 0;
-                    int entityCount = 0;
-                    int playerCount = 0;
-                    java.util.Map<String, Integer> blockTypes = new java.util.LinkedHashMap<>();
-                    java.util.Map<String, Integer> entityTypes = new java.util.LinkedHashMap<>();
-                    java.util.List<String> playerNames = new java.util.ArrayList<>();
-                    if (includeBlocks) {
-                        for (int x = -radius; x <= radius; x++) {
-                            for (int y = -radius; y <= radius; y++) {
-                                for (int z = -radius; z <= radius; z++) {
-                                    net.minecraft.core.BlockPos pos = playerPos.offset(x, y, z);
-                                    String blockName = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(pos).getBlock()).getPath();
-                                    blockTypes.merge(blockName, 1, Integer::sum);
-                                    blockCount++;
-                                }
-                            }
-                        }
-                    }
-                    if (includeEntities) {
-                        java.util.List<net.minecraft.world.entity.Entity> entities = mc.level.getEntitiesOfClass(net.minecraft.world.entity.Entity.class, mc.player.getBoundingBox().inflate(radius));
-                        for (net.minecraft.world.entity.Entity e : entities) {
-                            if (e instanceof net.minecraft.world.entity.player.Player) {
-                                String name = e.getName().getString();
-                                if (!playerNames.contains(name)) playerNames.add(name);
-                                playerCount++;
-                                continue;
-                            }
-                            String typeName = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath();
-                            entityTypes.merge(typeName, 1, Integer::sum);
-                            entityCount++;
-                        }
-                    }
-                    if (mc.level != null) {
-                        String selfName = mc.player.getName().getString();
-                        for (net.minecraft.world.entity.player.Player p : mc.level.players()) {
-                            String name = p.getName().getString();
-                            if (!name.equals(selfName) && !playerNames.contains(name)) playerNames.add(name);
-                        }
-                        playerCount = playerNames.size();
-                    }
-                    String aiName = config.ai_name != null ? config.ai_name : "Crafty";
-                    StringBuilder msg = new StringBuilder();
-                    msg.append("\u00A7b[").append(aiName).append("] \u00A77> \u00A7f");
-                    if (blockCount == 0 && entityCount == 0 && playerCount == 0) {
-                        msg.append("It\u00A7cs quiet around here \u2014 nothing notable within \u00A7e").append(radius).append("\u00A7f blocks.");
-                    } else {
-                        msg.append("Scan results within \u00A7e").append(radius).append("\u00A7f blocks:\n");
-                        if (includeBlocks && !blockTypes.isEmpty()) {
-                            msg.append("\u00A77  [\u00A7eBlocks\u00A77] \u00A7f");
-                            blockTypes.entrySet().stream()
-                                .sorted((a, b) -> b.getValue() - a.getValue())
-                                .limit(6)
-                                .forEach(e -> msg.append("\u00A77").append(e.getKey().replace('_', ' ')).append(" \u00A77x\u00A7e").append(e.getValue()).append("\u00A77, "));
-                            if (msg.charAt(msg.length() - 2) == ',') msg.setLength(msg.length() - 2);
-                            msg.append("\n");
-                        }
-                        if (includeEntities && !entityTypes.isEmpty()) {
-                            msg.append("\u00A77  [\u00A7cMobs\u00A77] \u00A7f");
-                            entityTypes.entrySet().stream()
-                                .sorted((a, b) -> b.getValue() - a.getValue())
-                                .forEach(e -> msg.append("\u00A7c").append(e.getKey().replace('_', ' ')).append(" \u00A77x\u00A7c").append(e.getValue()).append("\u00A77, "));
-                            if (msg.charAt(msg.length() - 2) == ',') msg.setLength(msg.length() - 2);
-                            msg.append("\n");
-                        }
-                        if (!playerNames.isEmpty()) {
-                            msg.append("\u00A77  [\u00A7bPlayers\u00A77] \u00A7f");
-                            for (int i = 0; i < playerNames.size(); i++) {
-                                msg.append("\u00A7b").append(playerNames.get(i));
-                                if (i < playerNames.size() - 1) msg.append("\u00A77, ");
-                            }
-                            msg.append("\n");
-                        }
-                        if (blockCount > 0 && includeBlocks) {
-                            msg.append("\u00A77  [\u00A7aSummary\u00A77] \u00A7f").append(blockCount).append(" blocks");
-                            if (entityCount > 0) msg.append(", ").append(entityCount).append(" mobs");
-                            if (playerCount > 0) msg.append(", ").append(playerCount).append(" player").append(playerCount > 1 ? "s" : "");
-                            String topBlock = blockTypes.entrySet().stream().max(java.util.Map.Entry.comparingByValue()).map(e -> e.getKey().replace('_', ' ')).orElse("air");
-                            msg.append(". Mostly \u00A7e").append(topBlock).append("\u00A7f.");
-                            boolean hasOre = blockTypes.keySet().stream().anyMatch(k -> k.contains("ore"));
-                            if (hasOre) msg.append(" \u00A7aOre deposits found!");
-                            msg.append("\n");
-                        }
-                    }
-                    mc.player.sendSystemMessage(Component.literal(msg.toString()));
-                    LOGGER.info("[CraftyAI] SCAN_BLOCKS r={} — {} blocks, {} mobs, {} players", radius, blockCount, entityCount, playerCount);
-
-                    // Send scan results back to AI so it can respond with informed decisions
-                    StringBuilder scanCtx = new StringBuilder();
-                    scanCtx.append("[Block Scan Results]\n");
-                    scanCtx.append("Player position: ").append(playerPos.getX()).append(", ").append(playerPos.getY()).append(", ").append(playerPos.getZ()).append("\n");
-                    // Detect if underground (solid blocks above player at Y+1 to Y+5)
-                    int solidAbove = 0;
-                    for (int dy = 1; dy <= 5; dy++) {
-                        if (!mc.level.getBlockState(playerPos.offset(0, dy, 0)).isAir()) solidAbove++;
-                    }
-                    scanCtx.append("Underground: ").append(solidAbove >= 3 ? "yes" : "no").append("\n");
-                    scanCtx.append("Radius: ").append(radius).append(" blocks\n");
-                    if (includeBlocks && !blockTypes.isEmpty()) {
-                        scanCtx.append("Blocks: ");
-                        blockTypes.entrySet().stream()
-                            .sorted((a, b) -> b.getValue() - a.getValue())
-                            .forEach(e -> scanCtx.append(e.getKey().replace('_', ' ')).append(" x").append(e.getValue()).append(", "));
-                        if (scanCtx.charAt(scanCtx.length() - 2) == ',') scanCtx.setLength(scanCtx.length() - 2);
-                        scanCtx.append("\n");
-                    }
-                    if (includeEntities && !entityTypes.isEmpty()) {
-                        scanCtx.append("Entities: ");
-                        entityTypes.entrySet().stream()
-                            .sorted((a, b) -> b.getValue() - a.getValue())
-                            .forEach(e -> scanCtx.append(e.getKey().replace('_', ' ')).append(" x").append(e.getValue()).append(", "));
-                        if (scanCtx.charAt(scanCtx.length() - 2) == ',') scanCtx.setLength(scanCtx.length() - 2);
-                        scanCtx.append("\n");
-                    }
-                    if (!playerNames.isEmpty()) {
-                        scanCtx.append("Players nearby: ").append(String.join(", ", playerNames)).append("\n");
-                    }
-                    final String scanContext = scanCtx.toString();
-                    handleClientChatDirect("Here are the scan results from my previous request. Based on this data, what do you recommend?", scanContext);
-                    continue; // skip sendCommand
-                }
-                // Handle DELAYED_ACTION:<seconds>:<innerAction>
-                if (action.toUpperCase().startsWith("DELAYED_ACTION:")) {
-                    String[] parts = action.split(":", 3);
-                    if (parts.length >= 3) {
-                        int delaySec = Math.max(1, Math.min(300, Integer.parseInt(parts[1])));
-                        String innerAction = parts[2];
-                        final String fa = innerAction;
-                        mc.player.sendSystemMessage(Component.literal("\u00A7e\u23F3 Action queued: " + innerAction + " in " + delaySec + "s"));
-                        Thread delayedThread = new Thread(() -> {
-                            try { Thread.sleep(delaySec * 1000L); } catch (InterruptedException e) { return; }
-                            mc.execute(() -> {
-                                if (mc.player != null && mc.player.isAlive()) {
-                                    executeAction(fa);
-                                }
-                            });
-                        }, "CraftyAI-DelayedAction");
-                        delayedThread.setDaemon(true);
-                        delayedThread.start();
-                    }
-                    continue;
-                }
-                // Handle SCHEDULE_TASK — send to server for storage
-                if (action.toUpperCase().startsWith("SCHEDULE_TASK:")) {
-                    String[] parts = action.split(":", 4);
-                    if (parts.length < 4) {
-                        mc.player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Invalid schedule format."));
-                        continue;
-                    }
-                    String cronExpr = parts[1].trim();
-                    String actionType = parts[2].trim().toLowerCase();
-                    String message = parts[3].trim();
-                    String taskName = message.length() > 40 ? message.substring(0, 40) + "..." : message;
-                    final String fCron = cronExpr;
-                    final String fType = actionType;
-                    final String fName = taskName;
-                    final String fMsg = message;
-                    mc.player.sendSystemMessage(Component.literal("\u00A7e\u23F0 Scheduling task..."));
-                    final String apiKeySnap = config.api_key;
-                    final String serverIdSnap = config.server_id;
-                    Thread schedThread = new Thread(() -> {
-                        try {
-                            java.util.Map<String, Object> schedPayload = new java.util.LinkedHashMap<>();
-                            schedPayload.put("name", fName);
-                            schedPayload.put("cron_expr", fCron);
-                            schedPayload.put("action_type", fType);
-                            java.util.Map<String, String> schedInner = new java.util.LinkedHashMap<>();
-                            schedInner.put("message", fMsg);
-                            schedPayload.put("action_payload", schedInner);
-                            String json = GSON.toJson(schedPayload);
-                            String targetUrl = GatewayRequestHeaders.getGatewayUrl() + "/v1/schedule-task";
-                            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
-                                .uri(java.net.URI.create(targetUrl))
-                                .header("Content-Type", "application/json")
-                                .header("Authorization", "Bearer " + apiKeySnap)
-                                .header("X-Server-ID", serverIdSnap)
-                                .header("User-Agent", "CraftyAI-Minecraft/" + com.demonz.craftyai.common.GatewayRequestHeaders.MOD_VERSION)
-                                .header("X-Client-Type", "minecraft-java")
-                                .header("X-CraftyAI-Version", com.demonz.craftyai.common.GatewayRequestHeaders.MOD_VERSION)
-                                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(json))
-                                .build();
-                            java.net.http.HttpResponse<String> resp = httpClient.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
-                            String respBody = resp.body();
-                            if (resp.statusCode() == 200) {
-                                mc.execute(() -> mc.player.sendSystemMessage(Component.literal("\u00A7a\u2714 Task scheduled: " + fName + " (" + fCron + ")")));
-                            } else {
-                                String errMsg = respBody.contains("error") ? respBody.substring(respBody.indexOf("\"error\""), Math.min(respBody.indexOf("\"error\"") + 80, respBody.length())) : "HTTP " + resp.statusCode();
-                                mc.execute(() -> mc.player.sendSystemMessage(Component.literal("\u00A7c\u2716 Schedule failed: " + errMsg)));
-                            }
-                        } catch (Exception e) {
-                            mc.execute(() -> mc.player.sendSystemMessage(Component.literal("\u00A7c\u2716 Schedule error: " + e.getMessage())));
-                        }                     }, "CraftyAI-ScheduleTask");
-                    schedThread.setDaemon(true);
-                    schedThread.start();
-                    continue;
-                }
-                // Handle CHAT:<command> — execute vanilla command as player
-                if (upper.startsWith("CHAT:")) {
-                    String cmd = action.substring("CHAT:".length()).trim();
-                    if (cmd.startsWith("/")) cmd = cmd.substring(1);
-                    cmd = normalizeLocateCommand(cmd);
-                    if (!AgenticActions.isAllowedChatCommand(cmd)) {
-                        mc.player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Blocked unsafe AI command. Only /locate is allowed."));
-                        continue;
-                    }
-                    final String finalCmd = cmd;
-                    mc.player.sendSystemMessage(Component.literal("\u00A77[CraftyAI] Running: /" + finalCmd));
-                    mc.player.connection.sendCommand(finalCmd);
-                    continue;
-                }
-                // Handle parameterized actions like GIVE:diamond:64, EFFECT:speed:120, etc.
-                if (action.toUpperCase().startsWith("GIVE:")) {
-                    String[] parts = action.split(":", 3);
-                    if (parts.length >= 2) {
-                        String item = parts[1].toLowerCase().trim();
-                        if (GIVE_BLACKLIST.contains(item)) {
-                            Minecraft.getInstance().player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Cannot give blacklisted item: " + item));
-                            LOGGER.warn("[CraftyAI] Blocked GIVE action for blacklisted item: {}", item);
-                            continue;
-                        }
-                        String count = parts.length >= 3 ? parts[2].trim() : "1";
-                        command = "give @s minecraft:" + item + " " + count;
-                        feedback = "\u00A7a\u2726 Given " + count + "x " + item;
-                    }
-                } else if (action.toUpperCase().startsWith("EFFECT:")) {
-                    String[] parts = action.split(":", 3);
-                    if (parts.length >= 2) {
-                        String effect = parts[1].toLowerCase().trim();
-                        String duration = parts.length >= 3 ? parts[2].trim() : "60";
-                        command = "effect give @s minecraft:" + effect + " " + duration;
-                        feedback = "\u00A7d\u2728 Applied " + effect + " for " + duration + "s";
-                    }
-                } else if (action.toUpperCase().startsWith("ENCHANT:")) {
-                    String[] parts = action.split(":", 3);
-                    if (parts.length >= 2) {
-                        String enchant = parts[1].toLowerCase().trim();
-                        String level = parts.length >= 3 ? parts[2].trim() : "1";
-                        command = "enchant @s minecraft:" + enchant + " " + level;
-                        feedback = "\u00A7b\u2728 Enchanted with " + enchant + " " + level;
-                    }
-                } else if (action.toUpperCase().startsWith("TP:")) {
-                    String[] parts = action.split(":", 4);
-                    if (parts.length >= 4) {
-                        command = "tp @s " + parts[1].trim() + " " + parts[2].trim() + " " + parts[3].trim();
-                        feedback = "\u00A7d\u2728 Teleporting to " + parts[1] + ", " + parts[2] + ", " + parts[3];
-                    }
-                }
-                break;
-        }
-
-        if (command != null) {
-            mc.player.sendSystemMessage(Component.literal("\u00A73[CraftyAI] " + (feedback != null ? feedback : "Executing action...")));
-            mc.getConnection().sendCommand(command);
-            LOGGER.info("[CraftyAI] Executed action: {} -> /{}", action, command);
-        } else {
-            LOGGER.warn("[CraftyAI] Unknown action trigger: {}", action);
-        }
-        } // End for loop
+        com.demonz.craftyai.common.ScanFlow.summarize(() -> sendAIRequest(prompt, playerName, context, "[]"))
+                .thenAccept(answer -> client.execute(() -> {
+                    if (client.player != player || client.level != world) return;
+                    player.sendSystemMessage(Component.literal("\u00A7b[" + config.ai_name + "] \u00A77> \u00A7f" + answer));
+                }));
     }
 
-    /**
-     * Client-side action inference: when the LLM truncates the action field,
-     * infer the action from the player's question and the AI's text response.
-     */
+    private volatile RunScope activeRun;
+    private long chatGeneration;
+
+    private static final class RunScope {
+        final Object player, world;
+        volatile boolean valid = true;
+        ActionHarness harness;
+        String waitingAction;
+        CompletableFuture<ActionHarness.Feedback> waiting;
+        RunScope(Object player, Object world) { this.player = player; this.world = world; }
+        boolean current() { return valid && harness != null && harness.isActive(); }
+        boolean inWorld(Minecraft mc) { return valid && mc.player == player && mc.level == world; }
+    }
+
+    private void cancelActiveRun() {
+        RunScope previous = activeRun;
+        activeRun = null;
+        if (previous != null) {
+            previous.valid = false;
+            previous.harness.cancel();
+            if (previous.waiting != null) previous.waiting.complete(new ActionHarness.Feedback(previous.waitingAction,
+                    ActionHarness.Status.CANCELLED, "Task cancelled."));
+        }
+    }
+
+    private void checkActionWorld(Minecraft mc) {
+        RunScope run = activeRun;
+        if (run != null && (!run.inWorld(mc) || config == null || config.force_local_mode || !config.ai_enable_actions || !config.agentic_tasks_enabled)) { chatGeneration++; cancelActiveRun(); }
+    }
+
+    private void resumeConfirmedAction(String action) {
+        Minecraft mc = Minecraft.getInstance();
+        RunScope run = activeRun;
+        if (run == null || !run.current() || !run.inWorld(mc) || run.waiting == null
+                || run.waiting.isDone() || !action.equals(run.waitingAction)) return;
+        CompletableFuture<ActionHarness.Feedback> waiting = run.waiting;
+        run.waiting = null;
+        executeSingleActionAsync(action, run, true).whenComplete((feedback, error) -> {
+            if (error != null) waiting.completeExceptionally(error); else waiting.complete(feedback);
+        });
+    }
+
+    public void runActionHarness(String initialAction, String question, String initialAnswer, String context, String historyJson, boolean confirmedByUser) {
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> {
+
+            if (confirmedByUser) { resumeConfirmedAction(initialAction); return; }
+            cancelActiveRun();
+            if (mc.player == null || mc.level == null || config.force_local_mode) return;
+            UUID playerId = mc.player.getUUID();
+            String playerName = mc.player.getName().getString();
+            RunScope run = new RunScope(mc.player, mc.level);
+            run.harness = new ActionHarness(action -> executeSingleActionAsync(action, run, false), observations -> {
+                String prompt = ActionHarness.formatFollowUpPrompt(question, observations);
+                return CompletableFuture.supplyAsync(() -> {
+                    if (!run.current() || config.force_local_mode) return null;
+                    String body = sendAIRequest(prompt, playerName, context, historyJson);
+                    if (body == null || body.startsWith("__ERROR__:")) return null;
+                    try { return GSON.fromJson(body, NeuralResponse.class); }
+                    catch (Exception invalid) { return null; }
+                });
+            });
+            activeRun = run;
+            run.harness.start(initialAction).thenAccept(answer -> mc.execute(() -> {
+                if (activeRun != run || !run.inWorld(mc)) return;
+                activeRun = null;
+                run.valid = false;
+                if (answer != null && !answer.trim().isEmpty()) {
+                    addToHistory(playerId, question, answer);
+                    mc.player.sendSystemMessage(Component.literal("\u00A7b[" + config.ai_name + "] \u00A77> \u00A7f" + answer));
+                }
+            }));
+        });
+    }
+
+    private CompletableFuture<ActionHarness.Feedback> executeSingleActionAsync(String action, RunScope run, boolean confirmed) {
+        CompletableFuture<ActionHarness.Feedback> result = new CompletableFuture<>();
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> {
+            if (!run.current() || !run.inWorld(mc)) {
+                result.complete(new ActionHarness.Feedback(action, ActionHarness.Status.CANCELLED, "The task is no longer active."));
+                return;
+            }
+            try {
+                executeActionOnClient(action, run, confirmed).whenComplete((feedback, error) -> {
+                    if (error != null) result.completeExceptionally(error); else result.complete(feedback);
+                });
+            } catch (Exception invalid) {
+                result.complete(new ActionHarness.Feedback(action, ActionHarness.Status.FAILED, "Invalid action: " + invalid.getMessage()));
+            }
+        });
+        return result;
+    }
+
+    private CompletableFuture<ActionHarness.Feedback> executeActionOnClient(String action, RunScope run, boolean confirmed) {
+        Minecraft mc = Minecraft.getInstance();
+        if (config.force_local_mode || !config.agentic_tasks_enabled || !config.ai_enable_actions) {
+            return CompletableFuture.completedFuture(new ActionHarness.Feedback(action, ActionHarness.Status.DENIED, "Actions are disabled in settings."));
+        }
+        String upper = action.trim().toUpperCase(java.util.Locale.ROOT);
+        String playerKey = mc.player.getUUID().toString();
+        String command = null;
+        if (!upper.startsWith("SCAN_BLOCKS:") && !upper.startsWith("DELAYED_ACTION:") && !upper.startsWith("SCHEDULE_TASK:")) {
+            command = com.demonz.craftyai.common.ActionCommands.command(action);
+        }
+        if (AgenticActions.riskFor(action) == AgenticActions.Risk.DESTRUCTIVE && config.require_confirmation && !confirmed) {
+            actionConfirmations.request(playerKey, action);
+            CompletableFuture<ActionHarness.Feedback> waiting = new CompletableFuture<>();
+            run.waitingAction = action;
+            run.waiting = waiting;
+            mc.player.sendSystemMessage(Component.literal("\u00A7e[CraftyAI] Confirm " + AgenticActions.description(action)
+                    + " with /craftyclient confirm within 30 seconds. Nothing has run yet."));
+            ScheduledFuture<?> expiry = TIMEOUTS.schedule(() -> waiting.complete(new ActionHarness.Feedback(action,
+                    ActionHarness.Status.DENIED, "Confirmation expired. Nothing was executed.")), 30, TimeUnit.SECONDS);
+            waiting.whenComplete((feedback, error) -> expiry.cancel(false));
+            return waiting;
+        }
+        if (!actionRateLimiter.tryAcquire(playerKey)) {
+            return CompletableFuture.completedFuture(new ActionHarness.Feedback(action, ActionHarness.Status.DENIED,
+                    "Action limit reached. Try again in " + actionRateLimiter.secondsUntilReset(playerKey) + " seconds."));
+        }
+        if (upper.startsWith("SCAN_BLOCKS:")) {
+            return CompletableFuture.completedFuture(new ActionHarness.Feedback(action, ActionHarness.Status.SUCCEEDED, performLocalBlockScan(action)));
+        }
+        if (upper.startsWith("DELAYED_ACTION:")) {
+            String[] parts = action.split(":", 3);
+            if (parts.length != 3 || parts[2].toUpperCase(java.util.Locale.ROOT).startsWith("DELAYED_ACTION:")) throw new IllegalArgumentException("Invalid or nested delayed action.");
+            int seconds = Integer.parseInt(parts[1]);
+            if (seconds < 1 || seconds > 90) throw new IllegalArgumentException("Delay must be between 1 and 90 seconds within this task.");
+            CompletableFuture<ActionHarness.Feedback> delayed = new CompletableFuture<>();
+            mc.player.sendSystemMessage(Component.literal("[CraftyAI] Waiting " + seconds + " seconds before the next action."));
+            ScheduledFuture<?> timer = TIMEOUTS.schedule(() -> executeSingleActionAsync(parts[2], run, false)
+                    .whenComplete((feedback, error) -> { if (error != null) delayed.completeExceptionally(error); else delayed.complete(feedback); }), seconds, TimeUnit.SECONDS);
+            run.harness.completion().whenComplete((answer, error) -> { timer.cancel(false); delayed.complete(new ActionHarness.Feedback(action, ActionHarness.Status.CANCELLED, "Task ended.")); });
+            return delayed;
+        }
+        if (upper.startsWith("SCHEDULE_TASK:")) {
+            String[] parts = action.split(":", 4);
+            if (parts.length != 4) throw new IllegalArgumentException("Invalid schedule format.");
+            String message = parts[3].trim();
+            return executeScheduleTaskAsync(message.substring(0, Math.min(40, message.length())), parts[1].trim(), parts[2].trim().toLowerCase(java.util.Locale.ROOT), message, action);
+        }
+        return CommandFeedbackBridge.execute(mc, command, action, run::current);
+    }
+
+    private String performLocalBlockScan(String action) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return "World unavailable";
+
+        String[] parts = action.split(":");
+        int radius = 8;
+        try {
+            if (parts.length >= 2) radius = Math.min(32, Math.max(1, Integer.parseInt(parts[1].trim())));
+        } catch (NumberFormatException ignored) {}
+        boolean includePlayers = parts.length >= 3 && "1".equals(parts[2]);
+        boolean includeEntities = parts.length >= 4 && "1".equals(parts[3]);
+        boolean includeBlocks = parts.length >= 5 && "1".equals(parts[4]);
+        if (!includeBlocks && !includeEntities && !includePlayers) {
+            includeBlocks = true; includeEntities = true;
+        }
+        net.minecraft.core.BlockPos playerPos = mc.player.blockPosition();
+        java.util.Map<String, Integer> blockTypes = new java.util.LinkedHashMap<>();
+        java.util.Map<String, Integer> entityTypes = new java.util.LinkedHashMap<>();
+        java.util.List<String> playerNames = new java.util.ArrayList<>();
+        int blockTotal = 0;
+        if (includeBlocks) {
+            for (int x = -radius; x <= radius; x += 2) {
+                for (int y = -radius; y <= radius; y += 2) {
+                    for (int z = -radius; z <= radius; z += 2) {
+                        net.minecraft.core.BlockPos pos = playerPos.offset(x, y, z);
+                        String blockName = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(pos).getBlock()).getPath();
+                        blockTypes.merge(blockName, 1, Integer::sum);
+                        blockTotal++;
+                    }
+                }
+            }
+        }
+        if (includeEntities || includePlayers) {
+            java.util.List<net.minecraft.world.entity.Entity> entities = mc.level.getEntitiesOfClass(net.minecraft.world.entity.Entity.class, mc.player.getBoundingBox().inflate(radius));
+            for (net.minecraft.world.entity.Entity e : entities) {
+                if (e == mc.player) continue;
+                if (e instanceof net.minecraft.world.entity.player.Player) {
+                    String name = e.getName().getString();
+                    if (includePlayers && !playerNames.contains(name)) playerNames.add(name);
+                    continue;
+                }
+                String typeName = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath();
+                if (includeEntities) if (includeEntities) if (includeEntities) entityTypes.merge(typeName, 1, Integer::sum);
+            }
+        }
+        LOGGER.info("[CraftyAI] SCAN_BLOCKS r={} \u2014 {} blocks, {} mob types, {} players", radius, blockTotal, entityTypes.size(), playerNames.size());
+
+        StringBuilder scanCtx = new StringBuilder("[Block Scan Results]\n");
+        scanCtx.append("Player position: ").append(playerPos.getX()).append(", ").append(playerPos.getY()).append(", ").append(playerPos.getZ()).append("\n");
+        int solidAbove = 0;
+        for (int dy = 1; dy <= 5; dy++) {
+            if (!mc.level.getBlockState(playerPos.offset(0, dy, 0)).isAir()) solidAbove++;
+        }
+        scanCtx.append("Underground: ").append(solidAbove >= 3 ? "yes" : "no").append("\n");
+        scanCtx.append("Radius: ").append(radius).append(" blocks\n");
+        if (!blockTypes.isEmpty()) {
+            scanCtx.append("Blocks: ");
+            int n = 0;
+            for (java.util.Map.Entry<String, Integer> e : blockTypes.entrySet()) {
+                if (n++ >= 12) { scanCtx.append("+").append(blockTypes.size() - 12).append(" more"); break; }
+                if (n > 1) scanCtx.append(", ");
+                scanCtx.append(e.getKey().replace('_', ' ')).append(" x").append(e.getValue());
+            }
+            scanCtx.append("\n");
+        }
+        if (!entityTypes.isEmpty()) {
+            scanCtx.append("Entities: ");
+            int n = 0;
+            for (java.util.Map.Entry<String, Integer> e : entityTypes.entrySet()) {
+                if (n++ > 0) scanCtx.append(", ");
+                scanCtx.append(e.getKey().replace('_', ' ')).append(" x").append(e.getValue());
+            }
+            scanCtx.append("\n");
+        }
+        if (!playerNames.isEmpty()) {
+            scanCtx.append("Players nearby: ").append(String.join(", ", playerNames)).append("\n");
+        }
+        return scanCtx.toString();
+    }
+
+    private CompletableFuture<ActionHarness.Feedback> executeScheduleTaskAsync(String fName, String fCron, String fType, String fMsg, String action) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.sendSystemMessage(Component.literal("\u00A7e\u23F0 Scheduling task..."));
+        }
+        final String apiKeySnap = config.api_key;
+        final String serverIdSnap = config.server_id;
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                java.util.Map<String, Object> schedPayload = new java.util.LinkedHashMap<>();
+                schedPayload.put("name", fName);
+                schedPayload.put("cron_expr", fCron);
+                schedPayload.put("action_type", fType);
+                java.util.Map<String, String> schedInner = new java.util.LinkedHashMap<>();
+                schedInner.put("message", fMsg);
+                schedPayload.put("action_payload", schedInner);
+                String schedJson = GSON.toJson(schedPayload);
+
+                String targetUrl = GatewayRequestHeaders.getGatewayUrl() + "/v1/schedule-task";
+                HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(targetUrl))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKeySnap)
+                    .header("X-Server-ID", serverIdSnap != null ? serverIdSnap : "")
+                    .header("User-Agent", "CraftyAI-Minecraft/" + GatewayRequestHeaders.MOD_VERSION)
+                    .header("X-Client-Type", "minecraft-java")
+                    .header("X-CraftyAI-Version", GatewayRequestHeaders.MOD_VERSION)
+                    .timeout(Duration.ofSeconds(10))
+                    .POST(HttpRequest.BodyPublishers.ofString(schedJson, StandardCharsets.UTF_8))
+                    .build();
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                String respBody = resp.body();
+                if (resp.statusCode() == 200) {
+                    return new ActionHarness.Feedback(action, ActionHarness.Status.SUCCEEDED, "Task scheduled: " + fName + " (" + fCron + ")");
+                } else {
+                    String errMsg = respBody.contains("error") ? respBody.substring(respBody.indexOf("\"error\""), Math.min(respBody.indexOf("\"error\"") + 80, respBody.length())) : "HTTP " + resp.statusCode();
+                    return new ActionHarness.Feedback(action, ActionHarness.Status.FAILED, "Schedule failed: " + errMsg);
+                }
+            } catch (Exception e) {
+                return new ActionHarness.Feedback(action, ActionHarness.Status.FAILED, "Schedule error: " + e.getMessage());
+            }
+        });
+    }
+
+    private void executeAction(String actionString) {
+        executeAction(actionString, null, false);
+    }
+
+    private void executeAction(String actionString, String originalQuestion) {
+        executeAction(actionString, originalQuestion, false);
+    }
+
+    private void executeAction(String actionString, String originalQuestion, boolean confirmedByUser) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+        runActionHarness(actionString, originalQuestion, null, buildContext(mc.player), "[]", confirmedByUser);
+    }
+
     private String inferActionFromText(String answer, String question) {
         if (answer == null || question == null) return null;
         String la = answer.toLowerCase();
@@ -1522,39 +1254,6 @@ public class CraftyAIModClient implements ClientModInitializer {
     }
 
     public static void safeSetScreen(Object client, Object screen) {
-        if (client == null) return;
-        LOGGER.info("[CraftyAI] safeSetScreen called with client={}, screen={}", client.getClass().getName(), screen != null ? screen.getClass().getName() : "null");
-        
-        for (java.lang.reflect.Method m : client.getClass().getMethods()) {
-            if (m.getParameterCount() == 1) {
-                String name = m.getName();
-                if (name.equals("setScreenAndShow") || name.equals("setScreen") || name.equals("method_1507") || name.equals("m_91152_")) {
-                    try {
-                        m.setAccessible(true);
-                        m.invoke(client, screen);
-                        LOGGER.info("[CraftyAI] Reflective setScreen method {} succeeded!", name);
-                        return;
-                    } catch (Throwable t) {
-                        LOGGER.warn("[CraftyAI] Reflective setScreen method {} failed: {}", name, t.toString());
-                    }
-                }
-            }
-        }
-        for (java.lang.reflect.Method m : client.getClass().getDeclaredMethods()) {
-            if (m.getParameterCount() == 1) {
-                String name = m.getName();
-                if (name.equals("setScreenAndShow") || name.equals("setScreen") || name.equals("method_1507") || name.equals("m_91152_")) {
-                    try {
-                        m.setAccessible(true);
-                        m.invoke(client, screen);
-                        LOGGER.info("[CraftyAI] Declared reflective setScreen method {} succeeded!", name);
-                        return;
-                    } catch (Throwable t) {
-                        LOGGER.warn("[CraftyAI] Declared reflective setScreen method {} failed: {}", name, t.toString());
-                    }
-                }
-            }
-        }
-        LOGGER.error("[CraftyAI] Failed to set screen via all reflective methods!");
+        if (client != null) com.demonz.craftyai.common.ModernScreenAccess.set(client, screen);
     }
 }

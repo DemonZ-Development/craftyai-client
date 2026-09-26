@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.io.File;
@@ -29,11 +28,6 @@ public class SessionManager {
     private static final Object LOCK = new Object();
     private static final Logger LOGGER = Logger.getLogger(SessionManager.class.getName());
 
-    /**
-     * Retrieves or generates a persistent Session ID.
-     * The ID is stored in a hidden `.craftyai_session` file to prevent accidental distribution in modpacks.
-     * Thread-safe: uses double-checked locking to prevent race conditions on first access.
-     */
     public static String getSessionId(Path configDir) {
         String id = currentSessionId;
         if (id != null && !id.isEmpty()) {
@@ -44,7 +38,7 @@ public class SessionManager {
         boolean needsWrite = false;
 
         synchronized (LOCK) {
-            // Double-check inside lock
+
             if (currentSessionId != null && !currentSessionId.isEmpty()) {
                 return currentSessionId;
             }
@@ -58,7 +52,6 @@ public class SessionManager {
                     }
                 }
 
-                // Generate new if missing or invalid
                 currentSessionId = "srv-" + UUID.randomUUID().toString().substring(0, 8);
                 LOGGER.info("[CraftyAI] Generated new session ID: " + currentSessionId);
                 needsWrite = true;
@@ -72,9 +65,11 @@ public class SessionManager {
             }
         }
 
-        // Write outside synchronized (Thread.sleep must not block while holding the lock)
         if (needsWrite) {
-            sessionFile.getParentFile().mkdirs();
+            File parent = sessionFile.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
             writeSessionFile(sessionFile, currentSessionId);
         }
 
@@ -86,7 +81,7 @@ public class SessionManager {
             Files.write(sessionFile.toPath(), id.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             return;
         } catch (IOException e) {
-            // retry after sleep
+
         }
         try {
             Thread.sleep(100);
@@ -101,13 +96,6 @@ public class SessionManager {
         }
     }
 
-    /**
-     * Force regeneration of the session ID (for admin use).
-     * Deletes the existing session file and clears the cached ID so the next
-     * call to {@link #getSessionId(Path)} will generate a fresh one.
-     *
-     * @param configDir The configuration directory containing the session file
-     */
     public static void resetSessionId(Path configDir) {
         synchronized (LOCK) {
             currentSessionId = null;
@@ -123,14 +111,6 @@ public class SessionManager {
         }
     }
 
-    /**
-     * Sets a new session ID (e.g. from auto-mint handshake) and persists it to disk.
-     * Updates both the in-memory cache and the `.craftyai_session` file.
-     * HIGH-NEW-24 fix: File write is inside synchronized block to prevent race conditions.
-     *
-     * @param configDir The configuration directory containing the session file
-     * @param newId     The new session ID (e.g. "srv-f382c3d8")
-     */
     public static void setSessionId(Path configDir, String newId) {
         if (newId == null || newId.isEmpty() || !newId.matches("^srv-[a-fA-F0-9]{8}$")) {
             return;
@@ -138,14 +118,14 @@ public class SessionManager {
         synchronized (LOCK) {
             currentSessionId = newId;
             File sessionFile = new File(configDir.toFile(), ".craftyai_session");
-            sessionFile.getParentFile().mkdirs();
+            File parent = sessionFile.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
             writeSessionFile(sessionFile, newId);
         }
     }
 
-    /**
-     * Force a memory cache reload (useful if file was manually changed)
-     */
     public static void reload() {
         synchronized (LOCK) {
             currentSessionId = null;

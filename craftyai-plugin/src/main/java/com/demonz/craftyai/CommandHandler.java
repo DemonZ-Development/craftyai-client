@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.google.gson.JsonArray;
@@ -35,9 +34,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/**
- * Handles all /crafty subcommands. Extracted from CraftyAI.java.
- */
 public class CommandHandler {
 
     private final CraftyAI plugin;
@@ -79,8 +75,6 @@ public class CommandHandler {
         sender.sendMessage(ChatColor.GRAY + "Unknown subcommand. Use " + ChatColor.WHITE + "/crafty help" + ChatColor.GRAY + " for a list of commands.");
         return true;
     }
-
-    // --- Subcommand handlers ---
 
     private boolean handleHelp(CommandSender sender) {
         String name = plugin.getAiName();
@@ -303,6 +297,7 @@ public class CommandHandler {
                 String targetUrl = com.demonz.craftyai.common.GatewayRequestHeaders.getGatewayUrl();
                 URL url = new URL(targetUrl + "/v1/pro/redeem");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(false);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
@@ -364,6 +359,7 @@ public class CommandHandler {
                 try {
                     URL url = new URL(targetUrl + "/v1/custom-prompt?server_id=" + sid);
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setInstanceFollowRedirects(false);
                     conn.setRequestMethod("GET");
                     conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
                     conn.setRequestProperty("X-CraftyAI-Version", plugin.getDescription().getVersion());
@@ -415,6 +411,7 @@ public class CommandHandler {
                 try {
                     URL url = new URL(targetUrl + "/v1/custom-prompt?server_id=" + sid);
                     conn = (HttpURLConnection) url.openConnection();
+                    conn.setInstanceFollowRedirects(false);
                     conn.setRequestMethod("PUT");
                     conn.setRequestProperty("Content-Type", "application/json");
                     conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
@@ -446,6 +443,7 @@ public class CommandHandler {
                 try {
                     URL url = new URL(targetUrl + "/v1/custom-prompt/reset?server_id=" + sid);
                     conn = (HttpURLConnection) url.openConnection();
+                    conn.setInstanceFollowRedirects(false);
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
                     conn.setRequestProperty("X-CraftyAI-Version", plugin.getDescription().getVersion());
@@ -510,6 +508,7 @@ public class CommandHandler {
                 String targetUrl = com.demonz.craftyai.common.GatewayRequestHeaders.getGatewayUrl();
                 URL url = new URL(targetUrl + "/v1/handshake-no-key");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(false);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setRequestProperty("X-Client-Type", "minecraft-spigot");
@@ -602,7 +601,7 @@ public class CommandHandler {
             if (localBrain != null) {
                 String localAnswer = localBrain.tryAnswer(question);
                 if (localAnswer != null) {
-                    String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7➦ &f{response}");
+                    String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7\u27A6 &f{response}");
                     adapter.sendMessage(player, "&8[Private] " + format.replace("{name}", aiName).replace("{response}", localAnswer));
                     conversations.addInteraction(player.getUniqueId(), question, localAnswer, true);
                     adapter.sendActionBar(player, "&e&lFORCED LOCAL MODE");
@@ -617,7 +616,7 @@ public class CommandHandler {
         if (plugin.getEngine() == null) { adapter.sendMessage(player, "&c[" + aiName + "] &7Neural engine not available."); return true; }
 
         final CraftyEngine engine = plugin.getEngine();
-        // Use ChatHandler.buildContext() instead of always-empty string
+
         final String context = plugin.getChatHandler() != null ? plugin.getChatHandler().buildContext(player) : "";
         adapter.sendActionBar(player, "&b&l" + aiName.toUpperCase() + " IS THINKING...");
         final List<Map<String, String>> history = conversations.getFormattedHistory(player.getUniqueId(), true);
@@ -630,7 +629,7 @@ public class CommandHandler {
                         if (!player.isOnline()) return;
                         String answer = engine.parseAnswer(response);
                         if (answer != null && !answer.isEmpty()) {
-                            String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7➦ &f{response}");
+                            String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7\u27A6 &f{response}");
                             adapter.sendMessage(player, "&8[Private] " + format.replace("{name}", aiName).replace("{response}", answer));
                             conversations.addInteraction(player.getUniqueId(), question, answer, true);
                             String action = engine.parseAction(response);
@@ -642,7 +641,7 @@ public class CommandHandler {
                                 if (ch != null) action = ch.inferActionFromText(answer, question);
                             }
                             if (action != null && (plugin.getConfig().getBoolean("ai.enable_actions", true) || plugin.getConfig().getBoolean("ai_agentic_tasks", false))) {
-                                plugin.getActionHandler().handleAction(plugin, player, action, plugin.getTier());
+                                plugin.getActionHandler().handleAction(plugin, player, action, plugin.getTier(), false, question);
                             }
                             adapter.playSound(player, plugin.getConfig().getString("chat.sounds.success", "ENTITY_EXPERIENCE_ORB_PICKUP"), 1.0f, 1.2f);
                         } else {
@@ -658,7 +657,7 @@ public class CommandHandler {
                         if (localBrain != null) {
                             String localAnswer = localBrain.tryAnswer(question);
                             if (localAnswer != null) {
-                                String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7➦ &f{response}");
+                                String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7\u27A6 &f{response}");
                                 adapter.sendMessage(player, "&8[Private] " + format.replace("{name}", aiName).replace("{response}", localAnswer));
                                 conversations.addInteraction(player.getUniqueId(), question, localAnswer, true);
                                 adapter.sendActionBar(player, "&e&lLOCAL MODE");
@@ -719,6 +718,7 @@ public class CommandHandler {
                 String apiKey = plugin.getConfig().getString("server.secret", "");
                 URL url = new URL(targetUrl + "/v1/link-generate");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(false);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setRequestProperty("Authorization", "Bearer " + apiKey);

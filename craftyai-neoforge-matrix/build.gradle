@@ -1,0 +1,60 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.146'
+}
+version = '1.4.0'
+group = 'com.demonz'
+def mc = providers.gradleProperty('minecraftVersion').get()
+def target = new groovy.json.JsonSlurper().parse(rootProject.file('loader-targets.json')).targets.find { it.minecraft == mc }
+if (!mc.startsWith('1.21') || target?.neoforge == null) throw new GradleException("No NeoForge 1.21 target for ${mc}")
+def patch = mc == '1.21' ? 0 : mc.tokenize('.')[2].toInteger()
+base.archivesName = "craftyai-neoforge-mc${mc}"
+layout.buildDirectory = layout.projectDirectory.dir("build/mc${mc}")
+repositories { mavenCentral() }
+neoForge { enable { version = target.neoforge; disableRecompilation = true } }
+java { toolchain.languageVersion = JavaLanguageVersion.of(21); withSourcesJar() }
+tasks.withType(JavaCompile).configureEach { options.release = 21; options.encoding = 'UTF-8' }
+dependencies { implementation project(':craftyai-common'); implementation 'com.google.code.gson:gson:2.10.1' }
+def sources = tasks.register('prepareMappedSources', Sync) {
+    inputs.property('minecraftVersion', mc)
+    inputs.file(project.buildFile)
+    from rootProject.file('craftyai-forge-26/src/main/java')
+    into layout.buildDirectory.dir('generated/sources/compat')
+    filteringCharset = 'UTF-8'
+    filter { line ->
+        if (patch < 11) {
+            line = line.replace('net.minecraft.resources.Identifier', 'net.minecraft.resources.ResourceLocation')
+                    .replace('Identifier ', 'ResourceLocation ').replace('Identifier.', 'ResourceLocation.')
+                    .replace('.identifier()', '.location()')
+            line = line.replace('sp.level().isPvpAllowed()', 'world.getServer().isPvpAllowed()')
+            line = line.replace('world.getServer().getPlayerList().isOp(sp.nameAndId())', 'sp.hasPermissions(2)')
+            line = line.replace('player.level().getServer().getPlayerList().isOp(player.nameAndId())', 'player.hasPermissions(2)')
+        } else {
+            line = line.replace('world.getServer().getPlayerList().isOp(sp.nameAndId())', 'sp.permissions().hasPermission(net.minecraft.server.permissions.Permissions.COMMANDS_GAMEMASTER)')
+            line = line.replace('player.level().getServer().getPlayerList().isOp(player.nameAndId())', 'player.permissions().hasPermission(net.minecraft.server.permissions.Permissions.COMMANDS_GAMEMASTER)')
+        }
+        line = line.replace('.getDefaultClockTime()', '.getDayTime()')
+        line = line.replace('state.getValues().forEach(entry -> target.properties.put(entry.property().getName(), String.valueOf(entry.value())))',
+                'state.getValues().forEach((property, value) -> target.properties.put(property.getName(), String.valueOf(value)))')
+        if (patch < 9) {
+            line = line.replace('.nameAndId()', '.getGameProfile()')
+                    .replace('KeyMapping.Category.MISC', '"key.categories.misc"')
+        }
+        if (patch < 5) line = line.replace('i < player.getInventory().getContainerSize()', 'i < Math.min(36, player.getInventory().getContainerSize())')
+        line = line.replace('g.text(', 'g.drawString(')
+                .replace('Minecraft.getInstance().schedule(', 'Minecraft.getInstance().execute(')
+                .replace('client.schedule(', 'client.execute(')
+        line = line.replace('player.sendSystemMessage(message);', 'player.displayClientMessage(message, false);')
+        return line
+    }
+}
+sourceSets.main {
+    java.srcDir sources
+    java.srcDir project(':craftyai-common').file('src/main/java')
+    resources.srcDir rootProject.file('craftyai-forge-26/src/main/resources')
+}
+processResources {
+    inputs.properties(version: project.version, minecraftVersion: mc, neoVersion: target.neoforge)
+    filesMatching('META-INF/neoforge.mods.toml') { expand version: project.version, minecraftVersion: mc, neoVersion: target.neoforge }
+}
+jar { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }

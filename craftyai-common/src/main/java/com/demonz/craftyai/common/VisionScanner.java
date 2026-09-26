@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.util.ArrayList;
@@ -21,24 +20,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Vision Scanner for environmental context
- * Provides detailed information about the player's surroundings
- */
 public class VisionScanner {
 
     private static VisionScannerProvider provider;
 
-    /**
-     * Register a platform-specific provider
-     */
     public static void registerProvider(VisionScannerProvider provider) {
         VisionScanner.provider = provider;
     }
 
-    /**
-     * Scan the player's surroundings
-     */
     public static ScanResult scan(Object player, Object world) {
         if (provider == null) {
             return new ScanResult();
@@ -46,9 +35,6 @@ public class VisionScanner {
         return provider.scan(player, world);
     }
 
-    /**
-     * Information about a nearby block
-     */
     public static class BlockInfo {
         public String blockType;
         public String position;
@@ -62,9 +48,6 @@ public class VisionScanner {
         }
     }
 
-    /**
-     * Information about a nearby entity
-     */
     public static class EntityInfo {
         public String entityType;
         public String name;
@@ -86,9 +69,6 @@ public class VisionScanner {
         }
     }
 
-    /**
-     * Information about a nearby player
-     */
     public static class PlayerInfo {
         public String name;
         public String position;
@@ -107,9 +87,21 @@ public class VisionScanner {
         }
     }
 
-    /**
-     * Detailed biome information
-     */
+    public static class TargetInfo {
+        public String targetType;
+        public String name;
+        public int distance;
+        public String position;
+        public Map<String, String> properties = new HashMap<>();
+
+        public TargetInfo(String targetType, String name, int distance, String position) {
+            this.targetType = targetType;
+            this.name = name;
+            this.distance = distance;
+            this.position = position;
+        }
+    }
+
     public static class BiomeInfo {
         public String name;
         public String temperature;
@@ -123,9 +115,6 @@ public class VisionScanner {
         }
     }
 
-    /**
-     * Scan result containing all environmental information
-     */
     public static class ScanResult {
         public List<BlockInfo> nearbyBlocks = new ArrayList<>();
         public List<EntityInfo> nearbyEntities = new ArrayList<>();
@@ -144,27 +133,24 @@ public class VisionScanner {
         public int experiencePoints = 0;
         public String dimension = "overworld";
 
-        // Permission & world context fields
+        public TargetInfo scanTarget;
+
         public String gameMode = "unknown";
         public boolean hasOp = false;
         public boolean cheatsEnabled = false;
         public String difficulty = "unknown";
         public boolean pvpEnabled = true;
         public boolean canFly = false;
-        public String worldType = "unknown"; // singleplayer / multiplayer / dedicated
+        public String worldType = "unknown";
         public List<String> activeEffects = new ArrayList<>();
-        public String serverBrand = "unknown"; // vanilla / paper / spigot / fabric / forge etc.
+        public String serverBrand = "unknown";
 
-        /**
-         * Convert scan result to a context string for AI
-         */
         public String toContextString() {
             StringBuilder sb = new StringBuilder();
 
-            // Permissions section — critical for agentic decision-making
             sb.append("[PERMISSIONS]\n");
             sb.append("GameMode: ").append(gameMode).append("\n");
-            sb.append("OP Status: ").append(hasOp ? "YES — has operator permissions" : "NO — does NOT have OP permissions").append("\n");
+            sb.append("OP Status: ").append(hasOp ? "YES \u2014 has operator permissions" : "NO \u2014 does NOT have OP permissions").append("\n");
             sb.append("Cheats: ").append(cheatsEnabled ? "enabled" : "disabled").append("\n");
             sb.append("Can Fly: ").append(canFly ? "yes" : "no").append("\n");
             sb.append("World Type: ").append(worldType).append("\n");
@@ -175,7 +161,25 @@ public class VisionScanner {
             }
             sb.append("\n");
 
-            // Environment
+            if (scanTarget != null && !"none".equals(scanTarget.targetType)) {
+                sb.append("[SCAN TARGET]\n");
+                sb.append("Type: ").append(scanTarget.targetType).append("\n");
+                sb.append("Name: ").append(scanTarget.name).append("\n");
+                if (scanTarget.distance >= 0) {
+                    sb.append("Distance: ").append(scanTarget.distance).append(" block(s)\n");
+                }
+                if (!scanTarget.properties.isEmpty()) {
+                    sb.append("Properties: ");
+                    int n = 0;
+                    for (Map.Entry<String, String> e : scanTarget.properties.entrySet()) {
+                        if (n++ > 0) sb.append(", ");
+                        sb.append(e.getKey()).append("=").append(e.getValue());
+                    }
+                    sb.append("\n");
+                }
+                sb.append("\n");
+            }
+
             sb.append("[ENVIRONMENT]\n");
             sb.append("Biome: ").append(biome.name);
             if (!biome.temperature.equals("unknown") || !biome.humidity.equals("unknown")) {
@@ -185,7 +189,6 @@ public class VisionScanner {
             sb.append("Dimension: ").append(dimension).append("\n");
             sb.append("Time: ").append(timeOfDay).append(", Weather: ").append(weather).append("\n");
 
-            // Player status
             sb.append("\n[PLAYER STATUS]\n");
             sb.append("Health: ").append(health).append("/").append(maxHealth).append(", Hunger: ").append(foodLevel).append("/").append(maxFoodLevel).append("\n");
             sb.append("Experience: Level ").append(experienceLevel).append(" (").append(experiencePoints).append(" XP)\n");
@@ -193,7 +196,7 @@ public class VisionScanner {
             if (!activeEffects.isEmpty()) {
                 sb.append("Active Effects: ").append(String.join(", ", activeEffects)).append("\n");
             }
-            
+
             if (!heldItem.isEmpty()) {
                 sb.append("Held item: ");
                 for (Map.Entry<String, Integer> entry : heldItem.entrySet()) {
@@ -201,7 +204,7 @@ public class VisionScanner {
                 }
                 sb.append("\n");
             }
-            
+
             if (!armor.isEmpty()) {
                 sb.append("Armor: ");
                 for (Map.Entry<String, Integer> entry : armor.entrySet()) {
@@ -209,13 +212,15 @@ public class VisionScanner {
                 }
                 sb.append("\n");
             }
-            
+
             if (!nearbyBlocks.isEmpty()) {
                 sb.append("\n[NEARBY BLOCKS] (").append(nearbyBlocks.size()).append("): ");
                 int count = 0;
                 for (BlockInfo block : nearbyBlocks) {
                     if (count++ < 10) {
-                        sb.append(block.blockType).append(", ");
+                        sb.append(block.blockType);
+                        if (block.distance >= 0) sb.append(" d").append(block.distance);
+                        sb.append(", ");
                     }
                 }
                 if (nearbyBlocks.size() > 10) {
@@ -223,7 +228,7 @@ public class VisionScanner {
                 }
                 sb.append("\n");
             }
-            
+
             if (!nearbyEntities.isEmpty()) {
                 sb.append("[NEARBY ENTITIES] (").append(nearbyEntities.size()).append("): ");
                 int count = 0;
@@ -233,6 +238,10 @@ public class VisionScanner {
                         if (entity.health > 0) {
                             sb.append(" HP:").append(entity.health).append("/").append(entity.maxHealth);
                         }
+                        if (entity.distance >= 0) {
+                            sb.append(" d").append(entity.distance);
+                            sb.append(entity.isHostile ? " [hostile]" : "");
+                        }
                         sb.append(", ");
                     }
                 }
@@ -241,7 +250,7 @@ public class VisionScanner {
                 }
                 sb.append("\n");
             }
-            
+
             if (!nearbyPlayers.isEmpty()) {
                 sb.append("[NEARBY PLAYERS] (").append(nearbyPlayers.size()).append("): ");
                 for (PlayerInfo player : nearbyPlayers) {
@@ -253,8 +262,7 @@ public class VisionScanner {
                 }
                 sb.append("\n");
             }
-            
-            // Inventory highlights
+
             if (!inventory.isEmpty()) {
                 sb.append("\n[INVENTORY]: ");
                 int count = 0;
@@ -269,15 +277,11 @@ public class VisionScanner {
                 }
                 sb.append("\n");
             }
-            
+
             return sb.toString();
         }
     }
 
-    /**
-     * Platform-specific vision scanner interface
-     * Fabric and Forge mods will implement this to provide actual scan data
-     */
     public interface VisionScannerProvider {
         ScanResult scan(Object player, Object world);
     }

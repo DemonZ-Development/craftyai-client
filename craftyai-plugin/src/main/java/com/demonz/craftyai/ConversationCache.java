@@ -13,22 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * ConversationCache — Stores per-player conversation history for context.
- * Thread-safe, with a configurable max history size.
- * Private commands (e.g. /crafty ask) are stored separately from public chat to prevent context leakage.
- */
 public class ConversationCache {
 
-    private static final int MAX_HISTORY = 10; // Max messages per player (5 Q+A pairs) // TODO: extract to craftyai-common
+    private static final int MAX_HISTORY = 10;
     private static final String PRIVATE_PREFIX = "p_";
-    private static final int MAX_CACHE_SIZE = 500; // Prevent unbounded memory growth
+    private static final int MAX_CACHE_SIZE = 500;
 
     private final ConcurrentHashMap<String, LinkedList<Map<String, String>>> cache = new ConcurrentHashMap<>();
 
@@ -56,7 +50,6 @@ public class ConversationCache {
             }
         }
 
-        // Evict oldest cache entries if total cache exceeds limit
         if (cache.size() > MAX_CACHE_SIZE) {
             Iterator<String> it = cache.keySet().iterator();
             while (cache.size() > MAX_CACHE_SIZE && it.hasNext()) {

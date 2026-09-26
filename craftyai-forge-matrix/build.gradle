@@ -1,0 +1,139 @@
+buildscript {
+    repositories { maven { url = 'https://maven.minecraftforge.net' }; mavenCentral() }
+    dependencies {
+        classpath gradle.startParameter.projectProperties.get('minecraftVersion') == '1.21.11'
+                ? 'net.minecraftforge:forgegradle:7.0.17'
+                : 'net.minecraftforge.gradle:ForgeGradle:6.0.54'
+    }
+}
+apply plugin: 'java-library'
+apply plugin: 'net.minecraftforge.gradle'
+version = '1.4.0'
+group = 'com.demonz'
+def mc = providers.gradleProperty('minecraftVersion').get()
+def target = new groovy.json.JsonSlurper().parse(rootProject.file('loader-targets.json')).targets.find { it.minecraft == mc }
+if (!mc.startsWith('1.21') || target?.forge == null) throw new GradleException("No Forge 1.21 target for ${mc}")
+def patch = mc == '1.21' ? 0 : mc.tokenize('.')[2].toInteger()
+
+base.archivesName = "craftyai-forge-mc${mc}"
+layout.buildDirectory = layout.projectDirectory.dir("build/mc${mc}")
+repositories {
+    if (patch >= 11) {
+        minecraft.mavenizer(it)
+        maven fg.forgeMaven
+        maven fg.minecraftLibsMaven
+    } else { maven { url = 'https://maven.minecraftforge.net/' } }
+    mavenCentral()
+}
+java { toolchain.languageVersion = JavaLanguageVersion.of(21) }
+tasks.withType(JavaCompile).configureEach { options.release = 21; options.encoding = 'UTF-8' }
+minecraft {
+    if (patch < 11) reobf = false
+    mappings channel: 'official', version: mc
+}
+dependencies {
+    if (patch >= 11) {
+        implementation minecraft.dependency("net.minecraftforge:forge:${target.forge}")
+    } else {
+        minecraft "net.minecraftforge:forge:${target.forge}"
+        implementation project(':craftyai-common')
+    }
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+configurations.configureEach {
+    resolutionStrategy.force 'net.sf.jopt-simple:jopt-simple:5.0.4'
+}
+def sources = tasks.register('prepareMappedSources', Sync) {
+    inputs.property('minecraftVersion', mc)
+    inputs.file(project.buildFile)
+    from rootProject.file('craftyai-forge-1206/src/main/java')
+    into layout.buildDirectory.dir('generated/sources/compat')
+    filteringCharset = 'UTF-8'
+    filter { line ->
+        line = line.replace('new net.minecraft.resources.ResourceLocation(', 'net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(')
+                .replace('net.minecraft.world.item.enchantment.Enchantment ench =', 'net.minecraft.core.Holder<net.minecraft.world.item.enchantment.Enchantment> ench =')
+        if (patch >= 2) {
+            line = line.replace(', player.getYRot(), player.getXRot());', ', java.util.Set.of(), player.getYRot(), player.getXRot(), false);')
+                    .replace('BuiltInRegistries.MOB_EFFECT.get(', 'BuiltInRegistries.MOB_EFFECT.getValue(')
+                    .replace('net.minecraft.core.registries.BuiltInRegistries.ENCHANTMENT.get(', 'player.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getOrThrow(')
+                    .replace('player.sendSystemMessage(message);', 'player.displayClientMessage(message, false);')
+        } else {
+            line = line.replace('net.minecraft.core.registries.BuiltInRegistries.ENCHANTMENT.get(', 'player.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getHolderOrThrow(')
+        }
+        if (patch >= 6) {
+            line = line.replace('net.minecraftforge.eventbus.api.SubscribeEvent', 'net.minecraftforge.eventbus.api.listener.SubscribeEvent')
+                    .replace('MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.server.ServerStartedEvent event)', 'net.minecraftforge.event.server.ServerStartedEvent.BUS.addListener((net.minecraftforge.event.server.ServerStartedEvent event)')
+                    .replace('MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.server.ServerStoppingEvent event)', 'net.minecraftforge.event.server.ServerStoppingEvent.BUS.addListener((net.minecraftforge.event.server.ServerStoppingEvent event)')
+                    .replace('FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup)', 'net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent.getBus(FMLJavaModLoadingContext.get().getModBusGroup()).addListener(event -> this.onCommonSetup())')
+                    .replace('public void onCommonSetup(FMLCommonSetupEvent event)', 'private void onCommonSetup()')
+                    .replace('MinecraftForge.EVENT_BUS.register(this)', 'MinecraftForge.EVENT_BUS.register(java.lang.invoke.MethodHandles.lookup(), this)')
+                    .replace('player.serverLevel()', '((net.minecraft.server.level.ServerLevel) player.level())')
+        }
+        if (patch >= 9) {
+            line = line.replace('player.getServer()', 'player.level().getServer()')
+                    .replace('fPlayer.getServer()', 'fPlayer.level().getServer()')
+                    .replace('source.getServer()', 'source.level().getServer()')
+                    .replace('sp.getServer()', 'sp.level().getServer()')
+                    .replace('level.getSharedSpawnPos()', 'level.getRespawnData().pos()')
+                    .replace('TickEvent.ClientTickEvent event', 'net.minecraftforge.event.TickEvent.ClientTickEvent.Post event')
+                    .replace('if (event.phase != TickEvent.Phase.END) return;', '// phase check')
+                    .replace('"category.craftyai"', 'net.minecraft.client.KeyMapping.Category.MISC')
+        }
+        line = line.replace('net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("minecraft", enchant)', 'net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.ENCHANTMENT, net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("minecraft", enchant))')
+        if (patch >= 11) {
+            line = line.replace('net.minecraft.resources.ResourceLocation', 'net.minecraft.resources.Identifier')
+                    .replace('ResourceLocation', 'net.minecraft.resources.Identifier')
+                    .replace('.location()', '.identifier()')
+                    .replace('.hasPermissions(2)', '.permissions().hasPermission(net.minecraft.server.permissions.Permissions.COMMANDS_GAMEMASTER)')
+                    .replace('sp.level().getServer().isPvpAllowed()', '((net.minecraft.server.level.ServerLevel) sp.level()).isPvpAllowed()')
+        }
+        return line
+    }
+    doLast {
+        if (patch >= 6) {
+            fileTree(destinationDir).matching { include '**/*Mod*.java' }.each { file ->
+                def text = file.getText('UTF-8')
+                ['onServerChat', 'onClientChat'].each { method ->
+                    def signature = text =~ /public (?:static )?void ${method}\(/
+                    if (signature.find()) {
+                        int start = signature.start()
+                        int end = text.indexOf('\n    }', start)
+                        def body = text.substring(start, end)
+                        body = body.replace("void ${method}(", "boolean ${method}(")
+                                .replace('event.setCanceled(true);', 'cancelled = true;')
+                                .replace('return;', 'return cancelled;')
+                        int brace = body.indexOf('{')
+                        body = body.substring(0, brace + 1) + '\n        boolean cancelled = false;' + body.substring(brace + 1)
+                        text = text.substring(0, start) + body + '\n        return cancelled;' + text.substring(end)
+                    }
+                }
+                file.setText(text, 'UTF-8')
+            }
+        }
+        if (patch >= 6) {
+            fileTree(destinationDir).matching { include '**/CraftyAIForgeModClient.java' }.each { file ->
+                def text = file.getText('UTF-8')
+                def oldBlock = text.contains('\r\n') ?
+                    '        @SubscribeEvent\r\n        public static void onRegisterKeyMappings(' :
+                    '        @SubscribeEvent\n        public static void onRegisterKeyMappings('
+                def newBlock = text.contains('\r\n') ?
+                    '    }\r\n    @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = CraftyAIForgeMod.MOD_ID, value = net.minecraftforge.api.distmarker.Dist.CLIENT)\r\n    public static class ForgeKeyEvents {\r\n        @SubscribeEvent\r\n        public static void onRegisterKeyMappings(' :
+                    '    }\n    @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = CraftyAIForgeMod.MOD_ID, value = net.minecraftforge.api.distmarker.Dist.CLIENT)\n    public static class ForgeKeyEvents {\n        @SubscribeEvent\n        public static void onRegisterKeyMappings('
+                text = text.replace(oldBlock, newBlock)
+                file.setText(text, 'UTF-8')
+            }
+        }
+    }
+}
+sourceSets.main {
+    java.srcDir sources
+    java.srcDir project(':craftyai-common').file('src/main/java')
+    resources.srcDir rootProject.file('craftyai-forge-1206/src/main/resources')
+}
+processResources {
+    inputs.properties(minecraftVersion: mc, forgeVersion: target.forge)
+    filesMatching('META-INF/mods.toml') {
+        filter { line -> line.replace('[1.20.6]', "[${mc}]").replace('[50.2.10,)', "[${target.forge.split('-')[1]},)").replace('[50,)', "[${target.forge.split('-')[1].split('\\.')[0]},)") }
+    }
+}
+jar { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }

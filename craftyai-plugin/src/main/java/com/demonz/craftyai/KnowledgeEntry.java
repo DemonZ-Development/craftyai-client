@@ -13,12 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
-/**
- * KnowledgeEntry — A single Q&A knowledge item for the local RAG system.
- */
 public class KnowledgeEntry {
 
     private final String question;

@@ -1,0 +1,21 @@
+if (providers.gradleProperty('minecraftVersion').getOrElse('') == '26.3') {
+    def adapted = layout.buildDirectory.dir('generated/sources/minecraft263')
+    def prepare = tasks.register('prepareMinecraft263Sources', Sync) {
+        inputs.file(rootProject.file('gradle/minecraft-26.3.gradle'))
+        from('src/main/java')
+        into(adapted)
+        filteringCharset = 'UTF-8'
+        filter { line ->
+            line.replace('import org.lwjgl.glfw.GLFW;', '// 26.3 uses Minecraft input constants backed by SDL.')
+                .replace('GLFW.GLFW_KEY_M', 'com.mojang.blaze3d.platform.InputConstants.KEY_M')
+                .replace('GLFW.GLFW_KEY_V', 'com.mojang.blaze3d.platform.InputConstants.KEY_V')
+                .replace('InputConstants.Type.KEYSYM', 'InputConstants.Type.KEYBOARD')
+                .replace('new MouseButtonInfo(0, 0)', 'new MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)')
+                .replace('player.canUseGameMasterBlocks()', 'player.permissions().hasPermission(net.minecraft.server.permissions.Permissions.COMMANDS_GAMEMASTER)')
+                .replace('mc.getSingleplayerServer().getPlayerList().isAllowCommandsForAllPlayers()', 'hasOp')
+        }
+    }
+    sourceSets.main.java.setSrcDirs([adapted, project(':craftyai-common').file('src/main/java')])
+    tasks.named('compileJava').configure { dependsOn prepare }
+    tasks.matching { it.name == 'sourcesJar' }.configureEach { dependsOn prepare }
+}

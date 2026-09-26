@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import org.bukkit.ChatColor;
@@ -30,11 +29,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
-/**
- * Chat activation algorithm: detects when a player is addressing the AI,
- * extracts the question, and dispatches it to the engine.
- * Extracted from CraftyAI.java.
- */
 public class ChatHandler implements Listener {
 
     private final CraftyAI plugin;
@@ -142,7 +136,7 @@ public class ChatHandler implements Listener {
         firstWord = firstWord.replaceAll("[,:!?]+$", "");
         for (String alias : aliases) {
             String compareAlias = caseSensitive ? alias : alias.toLowerCase();
-            // Skip short aliases (<3 chars) for fuzzy matching to prevent false positives
+
             if (compareAlias.length() < 3) continue;
             int distance = levenshteinDistance(firstWord, compareAlias);
             if (distance <= fuzzyThreshold && distance < compareAlias.length() / 2) {
@@ -211,7 +205,7 @@ public class ChatHandler implements Listener {
         if (plugin.getConfig().getBoolean("ai.force-local-mode", false)) {
             String localAnswer = localBrain.tryAnswer(question);
             if (localAnswer != null) {
-                String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7➦ &f{response}");
+                String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7\u27A6 &f{response}");
                 String formatted = format.replace("{name}", aiName).replace("{response}", localAnswer);
                 if (isPrivate) {
                     formatted = "&8[Private] " + formatted;
@@ -243,7 +237,7 @@ public class ChatHandler implements Listener {
                         if (!player.isOnline()) return;
                         String answer = engine.parseAnswer(response);
                         if (answer != null && !answer.isEmpty()) {
-                            String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7➦ &f{response}");
+                            String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7\u27A6 &f{response}");
 
                             String actionRaw = engine.parseAction(response);
                             if (actionRaw == null || actionRaw.isEmpty() || "null".equalsIgnoreCase(actionRaw)) {
@@ -263,7 +257,7 @@ public class ChatHandler implements Listener {
 
                             if (hasAction && !isSelfFeedback) {
                                 conversations.addInteraction(player.getUniqueId(), question, answer, isPrivate);
-                                plugin.getActionHandler().handleAction(plugin, player, action, plugin.getTier());
+                                plugin.getActionHandler().handleAction(plugin, player, action, plugin.getTier(), false, question);
 
                                 final String followUpFormat = format;
                                 final String originalQuestion = question;
@@ -319,7 +313,7 @@ public class ChatHandler implements Listener {
                                 }
                                 conversations.addInteraction(player.getUniqueId(), question, answer, isPrivate);
                                 if (hasAction) {
-                                    plugin.getActionHandler().handleAction(plugin, player, action, plugin.getTier());
+                                    plugin.getActionHandler().handleAction(plugin, player, action, plugin.getTier(), false, question);
                                 }
                                 adapter.playSound(player, plugin.getConfig().getString("chat.sounds.success", "ENTITY_EXPERIENCE_ORB_PICKUP"), 1.0f, 1.2f);
                             }
@@ -335,7 +329,7 @@ public class ChatHandler implements Listener {
                         if (!player.isOnline()) return;
                         String localAnswer = localBrain.tryAnswer(question);
                         if (localAnswer != null) {
-                            String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7➦ &f{response}");
+                            String format = plugin.getConfig().getString("chat.format", "&b[{name}] &7\u27A6 &f{response}");
                             String formatted = format.replace("{name}", aiNameFinal).replace("{response}", localAnswer);
                             if (isPrivate) {
                                 formatted = "&8[Private] " + formatted;
@@ -445,22 +439,15 @@ public class ChatHandler implements Listener {
         }
     }
 
-    /**
-     * Client-side action inference: when the LLM truncates the action field
-     * (300 token output limit), we infer the action from the player's question
-     * and the AI's text response.
-     */
     public String inferActionFromText(String answer, String question) {
         if (answer == null || question == null) return null;
         String la = answer.toLowerCase();
         String lq = question.toLowerCase();
 
-        // SCAN_BLOCKS: AI says "scanning" or "looking around"
         if (la.contains("scanning") || la.contains("looking around") || la.contains("checking surroundings")) {
             return "SCAN_BLOCKS:8:0:1:1";
         }
 
-        // DELAYED_ACTION: AI says "in X seconds/minutes" and question has delay keywords
         if (lq.matches(".*\\b(in|after|wait)\\s+\\d+\\s*(seconds?|sec|minutes?|min)\\b.*")) {
             java.util.regex.Matcher secM = java.util.regex.Pattern.compile("(\\d+)\\s*(?:second|sec)").matcher(lq);
             java.util.regex.Matcher minM = java.util.regex.Pattern.compile("(\\d+)\\s*minute").matcher(lq);
@@ -486,7 +473,6 @@ public class ChatHandler implements Listener {
             return "DELAYED_ACTION:" + delaySec + ":" + innerAction;
         }
 
-        // SCHEDULE_TASK: AI says "scheduled" or "every day/hour"
         if (la.contains("scheduled") || la.contains("recurring") || lq.contains("every day") || lq.contains("daily") || lq.contains("every hour") || lq.contains("remind me")) {
             String cron = "0 9 * * *";
             if (lq.contains("every hour")) cron = "0 * * * *";

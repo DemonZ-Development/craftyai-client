@@ -13,18 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-/**
- * Shared configuration class for CraftyAI mods
- * Used by both Fabric and Forge implementations
- */
 public class CraftyAIConfig {
-    public int config_version = 4;
+    public int config_version = 6;
     public long control_revision = 0;
     public String api_key = "YOUR_API_KEY_HERE";
     public String ai_name = "Crafty";
@@ -36,48 +31,37 @@ public class CraftyAIConfig {
     public boolean op_welcome_message = true;
     public boolean force_local_mode = false;
     public boolean telemetry_enabled = true;
-    public String response_visibility = "default"; // Options: "default", "always-private", "always-public"
+    public String response_visibility = "default";
     public boolean ai_enable_actions = true;
-    public String server_id = ""; // Saved to config as recovery key — also persisted in .craftyai_session
-    public transient volatile String tier = "free"; // Fetched from Gateway during handshake
+    public String server_id = "";
+    public transient volatile String tier = "free";
 
-    // Custom provider settings
     public boolean custom_provider_enabled = false;
     public String custom_provider_url = "";
     public String custom_provider_key = "";
     public String custom_provider_model = "";
 
-    // Agentic tasks - only pro users should have agentic tasks
-    public boolean agentic_tasks_enabled = false;
+    public boolean agentic_tasks_enabled = true;
 
-    // Block scanning — universally available (tier caps radius only)
     public boolean allow_block_scanning = true;
 
-    // When false, destructive actions execute immediately without /crafty confirm
     public boolean require_confirmation = true;
 
-    // Vision scanner settings
-    public String vision_activation = "V";  // Changed from Shift to V key
-    public String vision_activation_item = "COMPASS";  // Item to hold for Bukkit vision scanning
-    public boolean vision_shift_scan_enabled = false;  // Disabled by default since it conflicts with block placing
+    public String vision_activation = "item_right_click";
+    public String vision_activation_item = "COMPASS";
+    public int vision_cooldown = 5;
+    public boolean vision_shift_scan_enabled = false;
 
     private static final Gson GSON = new GsonBuilder().create();
 
-    /**
-     * Serialize config to JSON
-     */
     public String toJson() {
         return GSON.toJson(this);
     }
 
-    /**
-     * Deserialize config from JSON
-     */
     public static CraftyAIConfig fromJson(String json) {
         return GSON.fromJson(json, CraftyAIConfig.class);
     }
 
-    /** Replace this instance atomically after a candidate configuration validates. */
     public void copyFrom(CraftyAIConfig other) {
         if (other == null) return;
         this.config_version = other.config_version;
@@ -104,21 +88,14 @@ public class CraftyAIConfig {
         this.require_confirmation = other.require_confirmation;
         this.vision_activation = other.vision_activation;
         this.vision_activation_item = other.vision_activation_item;
+        this.vision_cooldown = other.vision_cooldown;
         this.vision_shift_scan_enabled = other.vision_shift_scan_enabled;
     }
 
-    /**
-     * Get cooldown in milliseconds
-     */
     public int getCooldownMs() {
         return cooldown_seconds * 1000;
     }
 
-    /**
-     * Returns the effective API URL based on config.
-     * If custom provider is enabled with a non-empty URL, returns the custom provider URL.
-     * Otherwise, returns the CraftyAI gateway URL.
-     */
     public String getEffectiveApiUrl() {
         if (custom_provider_enabled && custom_provider_url != null && !custom_provider_url.isEmpty()) {
             return custom_provider_url;
@@ -126,11 +103,6 @@ public class CraftyAIConfig {
         return GatewayRequestHeaders.getGatewayUrl();
     }
 
-    /**
-     * Returns the effective API key based on config.
-     * If custom provider is enabled with a non-empty key, returns the custom provider key.
-     * Otherwise, returns the standard API key.
-     */
     public String getEffectiveApiKey() {
         if (custom_provider_enabled && custom_provider_key != null && !custom_provider_key.isEmpty()) {
             return custom_provider_key;
@@ -138,19 +110,12 @@ public class CraftyAIConfig {
         return api_key;
     }
 
-    /**
-     * Checks if a key matches valid CraftyAI API key format (cai_...).
-     */
     public static boolean isValidApiKeyFormat(String key) {
         if (key == null) return false;
         String trimmed = key.trim();
         return trimmed.startsWith("cai_") && trimmed.length() >= 20 && trimmed.length() <= 132;
     }
 
-    /**
-     * Checks if an API key needs auto-minting (missing, unconfigured, or legacy format).
-     * Custom provider keys are never auto-minted.
-     */
     public static boolean needsAutoMint(String key, boolean customProviderEnabled) {
         if (customProviderEnabled) return false;
         if (key == null || key.trim().isEmpty()) return true;

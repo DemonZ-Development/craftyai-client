@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.demonz.craftyai.common.NeuralResponse;
@@ -34,12 +33,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * CraftyEngine V1.2 — Robust HTTP Client (Java 8+ Compatible)
- * =====================================================
- * Uses Gson for safe JSON handling. Maximum compatibility.
- * Supports both CraftyAI Gateway and custom chat-completions-compatible providers.
- */
 public class CraftyEngine {
 
     private static final Gson GSON = new Gson();
@@ -63,18 +56,10 @@ public class CraftyEngine {
         void onFailure(String error);
     }
 
-    /**
-     * Legacy constructor for backward compatibility (no custom provider).
-     */
     public CraftyEngine(CraftyAI plugin, VersionAdapter adapter, String serverSecret, String serverId, String gatewayUrl) {
         this(plugin, adapter, serverSecret, serverId, gatewayUrl, false, null, null);
     }
 
-    /**
-     * Full constructor with custom provider support.
-     * @param customProvider true if using a custom AI provider instead of the gateway
-     * @param customModel the model name for the custom provider (can be null)
-     */
     public CraftyEngine(CraftyAI plugin, VersionAdapter adapter, String serverSecret, String serverId, String gatewayUrl, boolean customProvider, String customModel, String serverName) {
         this.plugin = plugin;
         this.adapter = adapter;
@@ -93,9 +78,6 @@ public class CraftyEngine {
         this.gatewayUrl = (url != null && url.endsWith("/")) ? url.substring(0, url.length() - 1) : url;
     }
 
-    /**
-     * Returns true if this engine is configured to use a custom AI provider.
-     */
     public boolean isCustomProvider() {
         return customProvider;
     }
@@ -121,10 +103,10 @@ public class CraftyEngine {
             public void run() {
                 try {
                     if (customProvider) {
-                        // Custom provider: use industry-standard chat completions format /v1/chat/completions endpoint
+
                         sendCustomProviderRequest(player, question, context, history, callback, 0);
                     } else {
-                        // Gateway: use existing /v1/chat endpoint
+
                         Map<String, Object> payload = new HashMap<String, Object>();
                         payload.put("prompt", question);
                         payload.put("player_name", player.getName());
@@ -144,17 +126,12 @@ public class CraftyEngine {
         });
     }
 
-    /**
-     * Sends a request to a custom chat-completions-compatible provider.
-     * Uses the /v1/chat/completions endpoint format.
-     */
     private void sendCustomProviderRequest(Player player, String question, String context, List<Map<String, String>> history, Callback callback, int attempt) {
         HttpURLConnection conn = null;
         try {
-            // Build chat-completions-compatible messages array
+
             List<Map<String, String>> messages = new ArrayList<Map<String, String>>();
 
-            // System message with context
             if (context != null && !context.isEmpty()) {
                 Map<String, String> systemMsg = new HashMap<String, String>();
                 systemMsg.put("role", "system");
@@ -163,7 +140,6 @@ public class CraftyEngine {
                 messages.add(systemMsg);
             }
 
-            // Add conversation history
             if (history != null) {
                 for (Map<String, String> entry : history) {
                     Map<String, String> msg = new HashMap<String, String>();
@@ -177,13 +153,11 @@ public class CraftyEngine {
                 }
             }
 
-            // Add the user's question
             Map<String, String> userMsg = new HashMap<String, String>();
             userMsg.put("role", "user");
             userMsg.put("content", question);
             messages.add(userMsg);
 
-            // Build the chat-completions-compatible request payload
             Map<String, Object> payload = new HashMap<String, Object>();
             payload.put("messages", messages);
             payload.put("player_name", player.getName());
@@ -202,6 +176,7 @@ public class CraftyEngine {
 
             URL url = URI.create(endpoint).toURL();
             conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setConnectTimeout(CONNECT_TIMEOUT);
@@ -350,7 +325,7 @@ public class CraftyEngine {
                     if (serverName != null && !serverName.isEmpty()) {
                         payload.put("name", serverName);
                     }
-                    sendWithRetry(gatewayUrl + "/v1/handshake", GSON.toJson(payload), callback, 0, serverId);
+                    sendWithRetry(gatewayUrl + "/v1/handshake", GSON.toJson(payload), callback, 0, serverId, true);
                 } catch (Exception e) {
                     callback.onFailure("Handshake error: " + e.getMessage());
                 }
@@ -358,7 +333,6 @@ public class CraftyEngine {
         });
     }
 
-    /** Send a v1.3 Control Plane acknowledgement without affecting the chat circuit breaker. */
     public void sendControlAck(final String acknowledgementJson, final Callback callback) {
         if (customProvider || acknowledgementJson == null || acknowledgementJson.trim().isEmpty()) return;
         adapter.runAsync(new Runnable() {
@@ -367,6 +341,7 @@ public class CraftyEngine {
                 HttpURLConnection conn = null;
                 try {
                     conn = (HttpURLConnection) URI.create(gatewayUrl + "/v1/control/ack").toURL().openConnection();
+                    conn.setInstanceFollowRedirects(false);
                     conn.setRequestMethod("POST");
                     conn.setDoOutput(true);
                     conn.setConnectTimeout(8000);
@@ -395,10 +370,15 @@ public class CraftyEngine {
     }
 
     private void sendWithRetry(String urlStr, String jsonBody, Callback callback, int attempt, String serverId) {
+        sendWithRetry(urlStr, jsonBody, callback, attempt, serverId, false);
+    }
+
+    private void sendWithRetry(String urlStr, String jsonBody, Callback callback, int attempt, String serverId, boolean quiet) {
         HttpURLConnection conn = null;
         try {
             URL url = URI.create(urlStr).toURL();
             conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setConnectTimeout(CONNECT_TIMEOUT);
@@ -453,18 +433,18 @@ public class CraftyEngine {
                     callback.onFailure("\u00a7e[Rate Limit] Too many requests. Slow down.");
                 }
             } else if (status >= 500) {
-                handleRetry(urlStr, jsonBody, callback, attempt, "Server error (" + status + ")");
+                handleRetry(urlStr, jsonBody, callback, attempt, "Server error (" + status + ")", quiet);
             } else {
                 String errorBody = "";
                 try { errorBody = readStream(conn.getErrorStream()); } catch (Exception ignored) {}
                 callback.onFailure("Error (" + status + "): " + errorBody);
             }
         } catch (java.net.SocketTimeoutException e) {
-            handleRetry(urlStr, jsonBody, callback, attempt, "Request timed out");
+            handleRetry(urlStr, jsonBody, callback, attempt, "Request timed out", quiet);
         } catch (java.net.ConnectException e) {
-            handleRetry(urlStr, jsonBody, callback, attempt, "Connection refused");
+            handleRetry(urlStr, jsonBody, callback, attempt, "Connection refused", quiet);
         } catch (IOException e) {
-            handleRetry(urlStr, jsonBody, callback, attempt, "Network error: " + e.getMessage());
+            handleRetry(urlStr, jsonBody, callback, attempt, "Network error: " + e.getMessage(), quiet);
         } catch (Exception e) {
             callback.onFailure("System failure: " + e.getMessage());
         } finally {
@@ -494,18 +474,28 @@ public class CraftyEngine {
     }
 
     private void handleRetry(final String url, final String json, final Callback callback, final int attempt, String reason) {
+        handleRetry(url, json, callback, attempt, reason, false);
+    }
+
+    private void handleRetry(final String url, final String json, final Callback callback, final int attempt, String reason, final boolean quiet) {
         if (attempt < MAX_RETRIES) {
             final int next = attempt + 1;
-            plugin.getLogger().warning("[Neural] Retry " + next + "/" + MAX_RETRIES + " (" + reason + ")");
+            if (quiet) {
+                plugin.getLogger().fine("[Neural] Background retry " + next + "/" + MAX_RETRIES + " (" + reason + ") for " + url);
+            } else {
+                plugin.getLogger().warning("[Neural] Retry " + next + "/" + MAX_RETRIES + " (" + reason + ")");
+            }
             long delayTicks = (long) Math.pow(2, next) * 20L;
             adapter.runAsyncLater(new Runnable() {
                 @Override
                 public void run() {
-                    sendWithRetry(url, json, callback, next, serverId);
+                    sendWithRetry(url, json, callback, next, serverId, quiet);
                 }
             }, delayTicks);
         } else {
-            recordFailure();
+            if (!quiet) {
+                recordFailure();
+            }
             callback.onFailure("Neural uplink offline after " + MAX_RETRIES + " retries.");
         }
     }
@@ -529,27 +519,16 @@ public class CraftyEngine {
         return circuitOpenUntil > 0;
     }
 
-    /**
-     * Parse the answer from a response body. Returns null if parsing fails or no answer found.
-     */
     public String parseAnswer(String responseBody) {
         NeuralResponse res = parseResponse(responseBody);
         return res != null ? res.getAnswer() : null;
     }
 
-    /**
-     * Parse the action from a response body. Returns null if parsing fails or no action found.
-     */
     public String parseAction(String responseBody) {
         NeuralResponse res = parseResponse(responseBody);
         return res != null ? res.getAction() : null;
     }
 
-    /**
-     * Parse the response body into a NeuralResponse object.
-     * Caches the result to avoid double-parsing when both answer and action are needed.
-     * Returns null if the response body is null, empty, or cannot be parsed.
-     */
     private NeuralResponse parseResponse(String responseBody) {
         if (responseBody == null || responseBody.trim().isEmpty()) return null;
         try {
@@ -563,13 +542,9 @@ public class CraftyEngine {
     }
 
     public void shutdown() {
-        // HttpURLConnection doesn't need explicit shutdown
+
     }
 
-    /**
-     * Fetch a player's recent memories from the Gateway.
-     * Calls {@code POST /v1/memory-view} on the Gateway.
-     */
     public void listMemoriesAsync(String playerName, int limit, final Callback callback) {
         if (serverSecret == null || serverSecret.equals("YOUR_API_KEY_HERE")) {
             callback.onFailure("API key not configured.");
@@ -591,10 +566,6 @@ public class CraftyEngine {
         });
     }
 
-    /**
-     * Forget a player's most recent N memories.
-     * Calls {@code POST /v1/memory-forget} on the Gateway.
-     */
     public void forgetMemoriesAsync(String playerName, int count, final Callback callback) {
         if (serverSecret == null || serverSecret.equals("YOUR_API_KEY_HERE")) {
             callback.onFailure("API key not configured.");

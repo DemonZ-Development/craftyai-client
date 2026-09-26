@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import com.google.gson.JsonArray;
@@ -25,10 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Applies the safe, platform-neutral portion of the v1.3 control protocol.
- * Network transport and Minecraft-thread dispatch remain platform-owned.
- */
 public final class ControlPlaneProcessor {
     private static final int MAX_SEEN_COMMANDS = 1000;
     private static final Map<String, Long> SEEN_COMMANDS = new LinkedHashMap<String, Long>();
@@ -229,6 +224,10 @@ public final class ControlPlaneProcessor {
             config.allow_block_scanning = requiredBoolean(value);
         } else if ("vision.activation".equals(key)) {
             config.vision_activation = boundedString(value, 1, 32);
+        } else if ("vision.activation_item".equals(key)) {
+            config.vision_activation_item = boundedString(value, 1, 32);
+        } else if ("vision.cooldown".equals(key)) {
+            config.vision_cooldown = boundedInt(value, 0, 300);
         } else if ("vision.shift_scan_enabled".equals(key)) {
             config.vision_shift_scan_enabled = requiredBoolean(value);
         } else if ("experience.op_welcome".equals(key)) {

@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
 import com.demonz.craftyai.common.CraftyAIConfig;
@@ -59,9 +58,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * CraftyAI V1.0 — Fabric Mod (MC 26.x — Mojang Mappings)
- */
 public class CraftyAIMod implements ModInitializer {
 
     public static final String MOD_ID = "craftyai";
@@ -98,19 +94,18 @@ public class CraftyAIMod implements ModInitializer {
 
     private final ConcurrentHashMap<UUID, Long> chatCooldowns = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, LinkedList<Map<String, String>>> conversationCache = new ConcurrentHashMap<>();
-    // Per-player block scan cooldown (1/30s) to prevent tick-lag spam
+
     private final ConcurrentHashMap<String, Long> lastBlockScanTime = new ConcurrentHashMap<>();
     private static final int MAX_BLOCK_SCAN_TRACKED = 1000;
     private static final long BLOCK_SCAN_TTL_MS = 360_000L;
 
-    // Security: audit log, rate limit, and confirmation flow for agentic actions
     private ActionAuditLog auditLog;
     private ActionRateLimiter actionRateLimiter;
     private ActionConfirmation actionConfirmations;
 
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private volatile long circuitOpenUntil = 0;
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final com.demonz.craftyai.common.LifecycleHeartbeat scheduler = new com.demonz.craftyai.common.LifecycleHeartbeat();
 
     private boolean telemetryEnabled = true;
     private static MinecraftServer serverInstance;
@@ -126,25 +121,19 @@ public class CraftyAIMod implements ModInitializer {
         registerVisionScanner();
         initializeLocalBrain();
         registerOpWelcome();
-        
-        if (telemetryEnabled) {
-            performStartupHandshake();
-            // Control-plane heartbeat: five minutes matches the negotiated v2 cadence.
-            scheduler.scheduleWithFixedDelay(this::performStartupHandshake, 5, 5, TimeUnit.MINUTES);
-        } else {
-            LOGGER.info("[CraftyAI] Telemetry disabled. Status reporting is inactive.");
-        }
 
-        // Clean up telemetry scheduled heartbeat thread on server stop
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            if (telemetryEnabled && !loadedConfig.force_local_mode) scheduler.start(this::performStartupHandshake);
+        });
+
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
-            scheduler.shutdownNow();
+            scheduler.stop();
             LOGGER.info("[CraftyAI] Telemetry heartbeat scheduler shut down.");
         });
 
-        // Check for updates
-        UpdateChecker.checkForUpdatesAsync(LOGGER::info);
+        UpdateChecker.checkForUpdatesAsync(LOGGER::info, "fabric");
 
-        LOGGER.info("[CraftyAI] Neural Engine Online — Fabric Mod v" + GatewayRequestHeaders.MOD_VERSION);
+        LOGGER.info("[CraftyAI] Neural Engine Online \u2014 Fabric Mod v" + GatewayRequestHeaders.MOD_VERSION);
     }
 
     public void reloadConfig() {
@@ -152,7 +141,7 @@ public class CraftyAIMod implements ModInitializer {
         try {
             CraftyAIModClient.reloadConfig();
             if (loadedConfig != null) CraftyAIModClient.setTierFromServer(loadedConfig.tier);
-        } catch (NoClassDefFoundError ignored) { /* dedicated server — no client module */ }
+        } catch (NoClassDefFoundError ignored) {  }
         LOGGER.info("[CraftyAI] Configuration reloaded from disk.");
     }
 
@@ -166,15 +155,14 @@ public class CraftyAIMod implements ModInitializer {
         this.apiKey = loadedConfig.api_key;
         this.serverId = com.demonz.craftyai.common.SessionManager.getSessionId(
                 net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir());
-        // If config has a saved server_id that differs from session (e.g. session file deleted),
-        // restore the config's server_id so API key stays matched to its server
+
         if (loadedConfig.server_id != null && !loadedConfig.server_id.isEmpty()
                 && !loadedConfig.server_id.equals(this.serverId)) {
             com.demonz.craftyai.common.SessionManager.setSessionId(
                     net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir(), loadedConfig.server_id);
             this.serverId = loadedConfig.server_id;
         }
-        // Use custom provider URL if enabled, otherwise gateway URL
+
         if (loadedConfig.custom_provider_enabled && loadedConfig.custom_provider_url != null && !loadedConfig.custom_provider_url.isEmpty()) {
             this.gatewayUrl = loadedConfig.custom_provider_url;
         } else {
@@ -190,7 +178,7 @@ public class CraftyAIMod implements ModInitializer {
         if (loadedConfig.aliases != null && loadedConfig.aliases.length > 0) {
             this.aliases = Arrays.asList(loadedConfig.aliases);
         }
-        // Initialize security helpers (audit log, rate limiter, confirmation flow)
+
         String configDir = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().toString();
         if (this.auditLog == null) {
             this.auditLog = new ActionAuditLog(configDir, LOGGER::info);
@@ -208,9 +196,10 @@ public class CraftyAIMod implements ModInitializer {
     }
 
     private void performStartupHandshake() {
-        // Skip handshake if custom provider is enabled
+        if (loadedConfig == null || loadedConfig.force_local_mode || !loadedConfig.telemetry_enabled) return;
+
         if (loadedConfig.custom_provider_enabled) {
-            LOGGER.info("[CraftyAI] Custom provider enabled — skipping gateway handshake.");
+            LOGGER.info("[CraftyAI] Custom provider enabled \u2014 skipping gateway handshake.");
             return;
         }
 
@@ -309,7 +298,7 @@ public class CraftyAIMod implements ModInitializer {
         String serverName = "Fabric Server";
         if (serverInstance != null) {
             if (serverInstance.getMotd() != null && !serverInstance.getMotd().isEmpty()) {
-                serverName = serverInstance.getMotd().replaceAll("§[0-9a-fk-or]", "").trim();
+                serverName = serverInstance.getMotd().replaceAll("\u00A7[0-9a-fk-or]", "").trim();
                 if (serverName.isEmpty()) serverName = "Fabric Server";
             }
         }
@@ -346,16 +335,15 @@ public class CraftyAIMod implements ModInitializer {
                             }
                             loadedConfig.tier = newTier;
                             LOGGER.info("=========================================");
-                            LOGGER.info("[CraftyAI] NEW API KEY (save now, never shown again):");
-                            LOGGER.info("  {}", newKey);
+                            LOGGER.info("[CraftyAI] New API key saved to config/craftyai.json. Keep that file private.");
                             LOGGER.info("  Tier: {}", newTier);
                             LOGGER.info("  Server ID: {}", newServerId);
                             LOGGER.info("=========================================");
-                            // Sync client module's config so chat commands pick up the new key
+
                             try {
                                 CraftyAIModClient.reloadConfig();
                                 CraftyAIModClient.setTierFromServer(newTier);
-                            } catch (NoClassDefFoundError ignored) { /* dedicated server — no client module */ }
+                            } catch (NoClassDefFoundError ignored) {  }
                             performStartupHandshake();
                         } catch (Exception e) {
                             LOGGER.warn("[CraftyAI] Auto-mint parse failed: {}", e.getMessage());
@@ -380,9 +368,8 @@ public class CraftyAIMod implements ModInitializer {
             for (com.google.gson.JsonElement warnEl : warnings) {
                 if (!warnEl.isJsonObject()) continue;
                 String message = warnEl.getAsJsonObject().has("message") ? warnEl.getAsJsonObject().get("message").getAsString() : "Unknown warning";
-                LOGGER.warn("[CraftyAI] Session Warning: " + message.replaceAll("§.", ""));
+                LOGGER.warn("[CraftyAI] Session Warning: " + message.replaceAll("\u00A7.", ""));
 
-                // Broadcast warning to all OP players on the server
                 if (serverInstance != null) {
                     final String warnMessage = message;
                     serverInstance.execute(() -> {
@@ -400,7 +387,7 @@ public class CraftyAIMod implements ModInitializer {
     }
 
     private void registerOpWelcome() {
-        // Clean up player conversation cache on disconnect
+
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             conversationCache.remove(handler.getPlayer().getUUID());
         });
@@ -425,24 +412,24 @@ public class CraftyAIMod implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(Commands.literal("crafty")
                     .then(Commands.literal("help").executes(context -> {
-                        context.getSource().sendSuccess(() -> Component.literal("§b§l§m------------§r §6crafty ai v" + GatewayRequestHeaders.MOD_VERSION + " §b§l§m------------"), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§7Neural AI companion by §bDemonZ Development§7."), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§7Type §e@" + aiName.toLowerCase() + " <question> §7in chat, or use these commands:"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7b\u00A7l\u00A7m------------\u00A7r \u00A76crafty ai v" + GatewayRequestHeaders.MOD_VERSION + " \u00A7b\u00A7l\u00A7m------------"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A77Neural AI companion by \u00A7bDemonZ Development\u00A77."), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A77Type \u00A7e@" + aiName.toLowerCase() + " <question> \u00A77in chat, or use these commands:"), false);
                         context.getSource().sendSuccess(() -> Component.literal(""), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§e/crafty status   §8- §7Show plugin status and tier info"), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§e/crafty ask <q>  §8- §7Ask crafty ai privately"), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§e/crafty scan     §8- §7Vision scan nearby area"), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§e/crafty confirm  §8- §7Confirm a pending destructive action"), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§e/crafty pro      §8- §7Pro tier management"), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§e/crafty link     §8- §7Link this server to Discord"), false);
-                        context.getSource().sendSuccess(() -> Component.literal("§e/crafty reload   §8- §7Reload configuration (admin)"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7e/crafty status   \u00A78- \u00A77Show plugin status and tier info"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7e/crafty ask <q>  \u00A78- \u00A77Ask crafty ai privately"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7e/crafty scan     \u00A78- \u00A77Vision scan nearby area"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7e/crafty confirm  \u00A78- \u00A77Confirm a pending destructive action"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7e/crafty pro      \u00A78- \u00A77Pro tier management"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7e/crafty link     \u00A78- \u00A77Link this server to Discord"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7e/crafty reload   \u00A78- \u00A77Reload configuration (admin)"), false);
                         return 1;
                     }))
                     .then(Commands.literal("status").executes(context -> {
-                        context.getSource().sendSuccess(() -> Component.literal("§b[CraftyAI] Status: §aOnline"), false);
+                        context.getSource().sendSuccess(() -> Component.literal("\u00A7b[CraftyAI] Status: \u00A7aOnline"), false);
                         return 1;
                     }))
-                    // /crafty ask <question> — PRIVATE response to the executing player only
+
                     .then(Commands.literal("ask")
                             .requires(source -> {
                                 try { return isOp(source.getPlayerOrException()); }
@@ -457,7 +444,7 @@ public class CraftyAIMod implements ModInitializer {
                                     })
                             )
                     )
-                    // /crafty scan — vision scan of what the player is looking at
+
                     .then(Commands.literal("scan")
                             .requires(source -> {
                                 try { return isOp(source.getPlayerOrException()); }
@@ -468,60 +455,60 @@ public class CraftyAIMod implements ModInitializer {
                                 handleScanCommand(player);
                                 return 1;
                             }))
-                    // /crafty reload — reload config
+
                     .then(Commands.literal("reload")
                             .executes(context -> {
                                 net.minecraft.world.entity.Entity entity = context.getSource().getEntity();
                                 if (entity instanceof ServerPlayer) {
                                     if (!isOp((ServerPlayer) entity)) {
-                                        context.getSource().sendFailure(Component.literal("§c[CraftyAI] Only operators can reload config."));
+                                        context.getSource().sendFailure(Component.literal("\u00A7c[CraftyAI] Only operators can reload config."));
                                         return 0;
                                     }
                                 }
                                 loadConfig();
-                                context.getSource().sendSuccess(() -> Component.literal("§a[CraftyAI] Configuration reloaded successfully."), true);
+                                context.getSource().sendSuccess(() -> Component.literal("\u00A7a[CraftyAI] Configuration reloaded successfully."), true);
                                 return 1;
                             })
                     )
-                    // /crafty confirm — confirm a pending destructive action
+
                     .then(Commands.literal("confirm")
                             .executes(context -> {
                                 ServerPlayer player = context.getSource().getPlayerOrException();
                                 if (!isOp(player)) {
-                                    player.sendSystemMessage(Component.literal("§c[CraftyAI] Only operators can confirm actions."));
+                                    player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Only operators can confirm actions."));
                                     return 0;
                                 }
                                 String playerKey = player.getUUID().toString();
                                 if (actionConfirmations == null) {
-                                    player.sendSystemMessage(Component.literal("§c[CraftyAI] Confirmation system unavailable."));
+                                    player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Confirmation system unavailable."));
                                     return 0;
                                 }
                                 String pending = actionConfirmations.confirm(playerKey);
                                 if (pending == null) {
-                                    player.sendSystemMessage(Component.literal("§7[CraftyAI] No destructive action pending. Re-run your request first."));
+                                    player.sendSystemMessage(Component.literal("\u00A77[CraftyAI] No destructive action pending. Re-run your request first."));
                                 } else {
-                                    player.sendSystemMessage(Component.literal("§a[CraftyAI] Confirmed and executing: §f" + pending.toUpperCase()));
+                                    player.sendSystemMessage(Component.literal("\u00A7a[CraftyAI] Confirmed and executing: \u00A7f" + pending.toUpperCase()));
                                     handleAction(player, pending);
                                 }
                                 return 1;
                             })
                     )
-                    // /crafty pro <status|help> — show Pro tier info
+
                     .then(Commands.literal("pro")
                             .executes(context -> {
                                 String tierStr = (loadedConfig != null && loadedConfig.tier != null && !loadedConfig.tier.isEmpty()) ? loadedConfig.tier : "free";
                                 String tierUpper = tierStr.toUpperCase();
-                                String tierColor = tierStr.equalsIgnoreCase("pro") ? "§6"
-                                        : tierStr.equalsIgnoreCase("enterprise") ? "§d" : "§f";
+                                String tierColor = tierStr.equalsIgnoreCase("pro") ? "\u00A76"
+                                        : tierStr.equalsIgnoreCase("enterprise") ? "\u00A7d" : "\u00A7f";
                                 ServerPlayer player = null;
                                 try { player = context.getSource().getPlayerOrException(); } catch (Exception ignored) {}
                                 if (player != null) {
-                                    player.sendSystemMessage(Component.literal("§b[CraftyAI] Pro Status:"));
-                                    player.sendSystemMessage(Component.literal("§7  Tier: " + tierColor + tierUpper));
-                                    player.sendSystemMessage(Component.literal("§7  To upgrade: open a Pro ticket on Discord"));
-                                    player.sendSystemMessage(Component.literal("§7  §bhttps://discord.gg/zCkE44hsBR"));
+                                    player.sendSystemMessage(Component.literal("\u00A7b[CraftyAI] Pro Status:"));
+                                    player.sendSystemMessage(Component.literal("\u00A77  Tier: " + tierColor + tierUpper));
+                                    player.sendSystemMessage(Component.literal("\u00A77  To upgrade: open a Pro ticket on Discord"));
+                                    player.sendSystemMessage(Component.literal("\u00A77  \u00A7bhttps://discord.gg/zCkE44hsBR"));
                                 } else {
-                                    context.getSource().sendSuccess(() -> Component.literal("§b[CraftyAI] Tier: " + tierColor + tierUpper), false);
+                                    context.getSource().sendSuccess(() -> Component.literal("\u00A7b[CraftyAI] Tier: " + tierColor + tierUpper), false);
                                 }
                                 return 1;
                             })
@@ -529,13 +516,13 @@ public class CraftyAIMod implements ModInitializer {
                                     .executes(context -> {
                                         String tierStr = (loadedConfig != null && loadedConfig.tier != null && !loadedConfig.tier.isEmpty()) ? loadedConfig.tier : "free";
                                         String tierUpper = tierStr.toUpperCase();
-                                        String tierColor = tierStr.equalsIgnoreCase("pro") ? "§6"
-                                                : tierStr.equalsIgnoreCase("enterprise") ? "§d" : "§f";
+                                        String tierColor = tierStr.equalsIgnoreCase("pro") ? "\u00A76"
+                                                : tierStr.equalsIgnoreCase("enterprise") ? "\u00A7d" : "\u00A7f";
                                         ServerPlayer player = null;
                                         try { player = context.getSource().getPlayerOrException(); } catch (Exception ignored) {}
                                         if (player != null) {
-                                            player.sendSystemMessage(Component.literal("§b[CraftyAI] Pro Status:"));
-                                            player.sendSystemMessage(Component.literal("§7  Tier: " + tierColor + tierUpper));
+                                            player.sendSystemMessage(Component.literal("\u00A7b[CraftyAI] Pro Status:"));
+                                            player.sendSystemMessage(Component.literal("\u00A77  Tier: " + tierColor + tierUpper));
                                         }
                                         return 1;
                                     })
@@ -545,11 +532,11 @@ public class CraftyAIMod implements ModInitializer {
                                         ServerPlayer player = null;
                                         try { player = context.getSource().getPlayerOrException(); } catch (Exception ignored) {}
                                         if (player != null) {
-                                            player.sendSystemMessage(Component.literal("§b[CraftyAI] How to get Pro:"));
-                                            player.sendSystemMessage(Component.literal("§7  1. Join our Discord: §bhttps://discord.gg/zCkE44hsBR"));
-                                            player.sendSystemMessage(Component.literal("§7  2. Open a ticket in #pro-requests"));
-                                            player.sendSystemMessage(Component.literal("§7  3. An admin will review and DM you a Pro key"));
-                                            player.sendSystemMessage(Component.literal("§7  4. Run: §f/crafty pro redeem <key>"));
+                                            player.sendSystemMessage(Component.literal("\u00A7b[CraftyAI] How to get Pro:"));
+                                            player.sendSystemMessage(Component.literal("\u00A77  1. Join our Discord: \u00A7bhttps://discord.gg/zCkE44hsBR"));
+                                            player.sendSystemMessage(Component.literal("\u00A77  2. Open a ticket in #pro-requests"));
+                                            player.sendSystemMessage(Component.literal("\u00A77  3. An admin will review and DM you a Pro key"));
+                                            player.sendSystemMessage(Component.literal("\u00A77  4. Run: \u00A7f/crafty pro redeem <key>"));
                                         }
                                         return 1;
                                     })
@@ -561,23 +548,23 @@ public class CraftyAIMod implements ModInitializer {
                                                 try { player = context.getSource().getPlayerOrException(); } catch (Exception ignored) {}
                                                 if (player == null) return 0;
                                                 if (!isOp(player)) {
-                                                    player.sendSystemMessage(Component.literal("§c[CraftyAI] Only operators can redeem Pro keys."));
+                                                    player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Only operators can redeem Pro keys."));
                                                     return 0;
                                                 }
                                                 String proKey = StringArgumentType.getString(context, "key").trim();
                                                 String lowerKey = proKey.toLowerCase();
                                                 if (!lowerKey.startsWith("cai_pro_") && !lowerKey.startsWith("cai_pro-")) {
-                                                    player.sendSystemMessage(Component.literal("§c[CraftyAI] Invalid Pro key format."));
+                                                    player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Invalid Pro key format."));
                                                     return 0;
                                                 }
-                                                player.sendSystemMessage(Component.literal("§b[CraftyAI] Redeeming Pro key..."));
+                                                player.sendSystemMessage(Component.literal("\u00A7b[CraftyAI] Redeeming Pro key..."));
                                                 redeemProKey(player, proKey);
                                                 return 1;
                                             })
                                     )
                             )
                     )
-                    // /crafty link — generate Discord link code
+
                     .then(Commands.literal("link")
                             .requires(source -> {
                                 if (!source.isPlayer()) return false;
@@ -590,7 +577,7 @@ public class CraftyAIMod implements ModInitializer {
                                 ServerPlayer player = null;
                                 try { player = context.getSource().getPlayerOrException(); } catch (Exception ignored) {}
                                 if (player == null) {
-                                    context.getSource().sendFailure(Component.literal("§cOnly players can execute this command."));
+                                    context.getSource().sendFailure(Component.literal("\u00A7cOnly players can execute this command."));
                                     return 0;
                                 }
                                 handleLinkCommand(player);
@@ -601,9 +588,6 @@ public class CraftyAIMod implements ModInitializer {
         });
     }
 
-    /**
-     * Handle /crafty ask — response is PRIVATE to the executing player only.
-     */
     private void handleAskCommand(ServerPlayer player, String question) {
         if (isOnCooldown(player)) {
             player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Please wait before asking again."));
@@ -633,7 +617,7 @@ public class CraftyAIMod implements ModInitializer {
                         player.sendSystemMessage(Component.literal(""), true);
                         if (responseBody != null && responseBody.startsWith("__ERROR__:")) {
                             String errorMsg = responseBody.substring("__ERROR__:".length());
-                            // PRIVATE: only send to the player who ran the command
+
                             player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] " + errorMsg));
                         } else if (responseBody != null) {
                             updateTierFromResponse(responseBody);
@@ -647,7 +631,7 @@ public class CraftyAIMod implements ModInitializer {
                             }
                             String answer = res != null ? res.getAnswer() : null;
                             if (answer != null && !answer.isEmpty()) {
-                                // PRIVATE: only send to the player who ran the command
+
                                 player.sendSystemMessage(Component.literal("\u00A78[Private] \u00A7b[" + aiName + "] \u00A77> \u00A7f" + answer));
                                 addToHistory(player.getUUID(), question, answer);
                             }
@@ -658,7 +642,7 @@ public class CraftyAIMod implements ModInitializer {
                                 action = inferActionFromText(answer, question);
                             }
                             if (action != null) {
-                                handleAction(player, action);
+                                handleAction(player, action, question);
                             }
                             resetCircuit();
                         } else {
@@ -669,20 +653,51 @@ public class CraftyAIMod implements ModInitializer {
                 });
     }
 
-    /**
-     * Handle /crafty scan — vision scan command.
-     */
     private void handleScanCommand(ServerPlayer player) {
         VisionScanner.ScanResult scanResult = VisionScanner.scan(player, (ServerLevel) player.level());
-        String context = scanResult.toContextString();
-        player.sendSystemMessage(Component.literal("\u00A7b[CraftyAI] \u00A77Vision Scan Results:"));
-        // Send a condensed version
-        String[] lines = context.split("\n");
-        for (String line : lines) {
-            if (!line.isEmpty()) {
-                player.sendSystemMessage(Component.literal("\u00A77  " + line));
-            }
+        String context = com.demonz.craftyai.common.ScanFlow.buildAiContext(scanResult);
+        String prompt = com.demonz.craftyai.common.ScanFlow.scanCommandPrompt(aiName);
+        boolean hasTarget = scanResult.scanTarget != null && !"none".equals(scanResult.scanTarget.targetType);
+
+        if (isCircuitOpen() || (loadedConfig != null && loadedConfig.force_local_mode)) {
+            String offlineResponse = localBrain.generateOfflineResponse(
+                    hasTarget ? "what am I looking at" : "scan my surroundings",
+                    player.getName().getString());
+            player.sendSystemMessage(Component.literal("\u00A7b[" + aiName + "] \u00A77(Offline) \u00A7f" + offlineResponse));
+            return;
         }
+
+        player.sendSystemMessage(Component.literal("\u00A7b\u00A7l" + aiName.toUpperCase() + " IS SCANNING..."), true);
+
+        CompletableFuture.supplyAsync(() -> sendWithRetry(prompt, player.getName().getString(), context, new ArrayList<>(), 0))
+                .thenAccept(responseBody -> {
+                    player.level().getServer().execute(() -> {
+                        if (responseBody != null && responseBody.startsWith("__ERROR__:")) {
+                            String errorMsg = responseBody.substring("__ERROR__:".length());
+                            player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] " + errorMsg));
+                            return;
+                        }
+                        if (responseBody == null) {
+
+                            player.sendSystemMessage(Component.literal("\u00A7b[" + aiName + "] \u00A77> \u00A7fI scanned the area, but my thoughts got scrambled on the way back. Try again in a moment."));
+                            return;
+                        }
+                        updateTierFromResponse(responseBody);
+                        NeuralResponse res;
+                        try {
+                            res = GSON.fromJson(responseBody, NeuralResponse.class);
+                        } catch (Exception parseEx) {
+                            LOGGER.error("[CraftyAI] Failed to parse API response: {}", parseEx.getMessage());
+                            player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Failed to parse AI response."));
+                            return;
+                        }
+                        String answer = res != null ? res.getAnswer() : null;
+                        if (answer != null && !answer.isEmpty()) {
+                            player.sendSystemMessage(Component.literal("\u00A78[Private] \u00A7b[" + aiName + "] \u00A77> \u00A7f" + answer));
+                        }
+                        resetCircuit();
+                    });
+                });
     }
 
     private void registerChatListener() {
@@ -702,12 +717,12 @@ public class CraftyAIMod implements ModInitializer {
             if (question == null) return true;
 
             if (isOnCooldown(sender)) {
-                sender.sendSystemMessage(Component.literal("§c[CraftyAI] Please wait before asking again."));
+                sender.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Please wait before asking again."));
                 return false;
             }
 
             if (isPrivate) {
-                // Send the message locally to the player so they see it in their chat log
+
                 sender.sendSystemMessage(Component.literal("<" + sender.getName().getString() + "> " + rawText));
             } else {
                 broadcastToAll(Component.literal("<" + sender.getName().getString() + "> " + rawText));
@@ -779,7 +794,7 @@ public class CraftyAIMod implements ModInitializer {
                                     action = inferActionFromText(answer, question);
                                 }
                                 if (action != null) {
-                                    handleAction(sender, action);
+                                    handleAction(sender, action, question);
                                 }
                                 resetCircuit();
                             } else {
@@ -794,9 +809,6 @@ public class CraftyAIMod implements ModInitializer {
                 });
     }
 
-    /**
-     * Broadcast a message to ALL players on the server.
-     */
     private void broadcastToAll(Component message) {
         if (serverInstance == null) return;
         for (ServerPlayer player : serverInstance.getPlayerList().getPlayers()) {
@@ -804,14 +816,12 @@ public class CraftyAIMod implements ModInitializer {
         }
     }
 
-    /**
-     * v1.2.0-beta: Redeem a Pro key via /v1/pro/redeem
-     */
     private void redeemProKey(ServerPlayer player, String proKey) {
         try {
             String sessionId = this.serverId != null ? this.serverId : "unknown";
             java.net.URI uri = java.net.URI.create(com.demonz.craftyai.common.GatewayRequestHeaders.getGatewayUrl() + "/v1/pro/redeem");
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) uri.toURL().openConnection();
+            conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("X-Client-Type", "minecraft-fabric-26");
@@ -836,29 +846,33 @@ public class CraftyAIMod implements ModInitializer {
             }
             if (code == 200) {
                 LOGGER.info("[CraftyAI] Pro key redeemed for session {}", sessionId);
-                player.sendSystemMessage(Component.literal("§a[CraftyAI] Pro key redeemed successfully!"));
+                player.sendSystemMessage(Component.literal("\u00A7a[CraftyAI] Pro key redeemed successfully!"));
                 performStartupHandshake();
             } else {
                 String err = respBody.length() > 200 ? respBody.substring(0, 200) : respBody;
-                player.sendSystemMessage(Component.literal("§c[CraftyAI] Redeem failed (HTTP " + code + "): " + err));
+                player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Redeem failed (HTTP " + code + "): " + err));
             }
         } catch (Throwable t) {
-            LOGGER.warn("[CraftyAI] Pro redeem error: {} — {}", t.getClass().getSimpleName(), t.getMessage());
-            player.sendSystemMessage(Component.literal("§c[CraftyAI] Redeem error: " + t.getMessage()));
+            LOGGER.warn("[CraftyAI] Pro redeem error: {} \u2014 {}", t.getClass().getSimpleName(), t.getMessage());
+            player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Redeem error: " + t.getMessage()));
         }
     }
 
     private void handleAction(ServerPlayer player, String actionString) {
+        handleAction(player, actionString, null);
+    }
+
+    private void handleAction(ServerPlayer player, String actionString, String originalQuestion) {
         if (actionString == null || actionString.trim().isEmpty() || actionString.equalsIgnoreCase("null")) return;
-        // Wrap in try-catch so a single failed action doesn't kill the executor.
+
         try {
-            handleActionInternal(player, actionString);
+            handleActionInternal(player, actionString, originalQuestion);
         } catch (Throwable t) {
             try {
-                LOGGER.warn("[CraftyAI] Action handler error for {} (action='{}'): {} — {}",
+                LOGGER.warn("[CraftyAI] Action handler error for {} (action='{}'): {} \u2014 {}",
                         player.getName().getString(), actionString,
                         t.getClass().getSimpleName(), t.getMessage());
-                player.sendSystemMessage(Component.literal("§c[CraftyAI] Action failed: " + t.getMessage()));
+                player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Action failed: " + t.getMessage()));
             } catch (Throwable ignored) {}
         }
     }
@@ -885,27 +899,26 @@ public class CraftyAIMod implements ModInitializer {
     }
 
     private void handleActionInternal(ServerPlayer player, String actionString) {
+        handleActionInternal(player, actionString, null);
+    }
 
-        // Agentic tasks are FREE for all tiers.
-        // No tier check. Only config + OP permission gates remain.
+    private void handleActionInternal(ServerPlayer player, String actionString, String originalQuestion) {
 
-        // Check local configuration
         if (!loadedConfig.agentic_tasks_enabled || !loadedConfig.ai_enable_actions) {
-            player.sendSystemMessage(Component.literal("§8[CraftyAI] §7Action suggested: §e" + actionString + " §8(agentic tasks disabled in config)"));
-            LOGGER.info("[CraftyAI] Skipped agentic action {} — agentic tasks disabled", actionString);
+            player.sendSystemMessage(Component.literal("\u00A78[CraftyAI] \u00A77Action suggested: \u00A7e" + actionString + " \u00A78(agentic tasks disabled in config)"));
+            LOGGER.info("[CraftyAI] Skipped agentic action {} \u2014 agentic tasks disabled", actionString);
             return;
         }
 
         if (!isOp(player)) {
-            player.sendSystemMessage(Component.literal("§c[CraftyAI] Missing permission: crafty.agentic — action not executed"));
+            player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Missing permission: crafty.agentic \u2014 action not executed"));
             return;
         }
 
-        // Per-player rate limit (5 actions per 60s by default)
         String playerKey = player.getUUID().toString();
         if (actionRateLimiter != null && !actionRateLimiter.tryAcquire(playerKey)) {
             long sec = actionRateLimiter.secondsUntilReset(playerKey);
-            player.sendSystemMessage(Component.literal("§c[CraftyAI] Rate limit: try again in " + sec + "s"));
+            player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Rate limit: try again in " + sec + "s"));
             return;
         }
 
@@ -916,102 +929,97 @@ public class CraftyAIMod implements ModInitializer {
             String upper = action.toUpperCase().trim();
             if (upper.isEmpty()) continue;
 
-            // Per-action permission check (centralized via AgenticActions).
-            // On Fabric 1.26, per-action perms map to OP level (no granular perm mod bundled).
             String perm = AgenticActions.permissionFor(action);
             if (perm != null) {
                 if (!isOp(player)) {
-                    player.sendSystemMessage(Component.literal("§c[CraftyAI] Missing permission: " + perm));
+                    player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Missing permission: " + perm));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, false, "missing permission " + perm);
                     continue;
                 }
             }
 
-            // Destructive action confirmation flow
             AgenticActions.Risk risk = AgenticActions.riskFor(action);
             if (risk == AgenticActions.Risk.DESTRUCTIVE && (loadedConfig == null || loadedConfig.require_confirmation)) {
                 String pending = actionConfirmations != null ? actionConfirmations.confirm(playerKey) : null;
                 if (pending == null || !pending.equalsIgnoreCase(upper)) {
                     if (actionConfirmations != null) actionConfirmations.request(playerKey, action);
-                    player.sendSystemMessage(Component.literal("§c⚠ Destructive action: §f" + upper + " §c— run §e/crafty confirm §cwithin 30s to execute."));
+                    player.sendSystemMessage(Component.literal("\u00A7c\u26A0 Destructive action: \u00A7f" + upper + " \u00A7c\u2014 run \u00A7e/crafty confirm \u00A7cwithin 30s to execute."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, false, "awaiting confirmation");
                     continue;
                 }
-                // Confirmed; fall through to execution
+
             }
 
-            // --- ATOMIC ACTIONS ---
             switch (upper) {
                 case "TIME_DAY":
                     runServerCommand(player, "time set day");
-                    player.sendSystemMessage(Component.literal("§eTime set to day."));
+                    player.sendSystemMessage(Component.literal("\u00A7eTime set to day."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "TIME_NIGHT":
                     runServerCommand(player, "time set night");
-                    player.sendSystemMessage(Component.literal("§9Time set to night."));
+                    player.sendSystemMessage(Component.literal("\u00A79Time set to night."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "WEATHER_CLEAR":
                     runServerCommand(player, "weather clear");
-                    player.sendSystemMessage(Component.literal("§bWeather cleared."));
+                    player.sendSystemMessage(Component.literal("\u00A7bWeather cleared."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "WEATHER_RAIN":
                     runServerCommand(player, "weather rain");
-                    player.sendSystemMessage(Component.literal("§9Weather set to rain."));
+                    player.sendSystemMessage(Component.literal("\u00A79Weather set to rain."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "WEATHER_THUNDER":
                     runServerCommand(player, "weather thunder");
-                    player.sendSystemMessage(Component.literal("§c⚡ Thunderstorm activated"));
+                    player.sendSystemMessage(Component.literal("\u00A7c\u26A1 Thunderstorm activated"));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "HEAL":
                     runServerCommand(player, "effect give @s minecraft:instant_health 1 255");
-                    player.sendSystemMessage(Component.literal("§aHealed!"));
+                    player.sendSystemMessage(Component.literal("\u00A7aHealed!"));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "FEED":
                     runServerCommand(player, "effect give @s minecraft:saturation 1 255");
-                    player.sendSystemMessage(Component.literal("§6Fully fed!"));
+                    player.sendSystemMessage(Component.literal("\u00A76Fully fed!"));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "KILL_MOBS":
                     runServerCommand(player, "kill @e[type=!player,distance=..50,type=!item,type=!xp_orb]");
-                    player.sendSystemMessage(Component.literal("§c☠ Nearby mobs eliminated"));
+                    player.sendSystemMessage(Component.literal("\u00A7c\u2620 Nearby mobs eliminated"));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "TELEPORT_SPAWN":
                     runServerCommand(player, "tp @s 0 64 0");
-                    player.sendSystemMessage(Component.literal("§d✨ Teleporting to spawn..."));
+                    player.sendSystemMessage(Component.literal("\u00A7d\u2728 Teleporting to spawn..."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "GAMEMODE_CREATIVE":
                     runServerCommand(player, "gamemode creative");
-                    player.sendSystemMessage(Component.literal("§bGamemode updated to Creative."));
+                    player.sendSystemMessage(Component.literal("\u00A7bGamemode updated to Creative."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "GAMEMODE_SURVIVAL":
                     runServerCommand(player, "gamemode survival");
-                    player.sendSystemMessage(Component.literal("§bGamemode updated to Survival."));
+                    player.sendSystemMessage(Component.literal("\u00A7bGamemode updated to Survival."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
                 case "GAMEMODE_SPECTATOR":
                     runServerCommand(player, "gamemode spectator");
-                    player.sendSystemMessage(Component.literal("§bGamemode updated to Spectator."));
+                    player.sendSystemMessage(Component.literal("\u00A7bGamemode updated to Spectator."));
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     continue;
             }
 
-            // --- PARAMETERIZED ACTIONS ---
             try {
                 if (upper.startsWith("GIVE:")) {
                     String[] parts = action.split(":", 3);
                     if (parts.length >= 2) {
                         String itemId = parts[1].toLowerCase(Locale.ROOT).trim();
                         if (GIVE_BLACKLIST.contains(itemId)) {
-                            player.sendSystemMessage(Component.literal("§c[CraftyAI] Cannot give blacklisted item: " + itemId));
+                            player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Cannot give blacklisted item: " + itemId));
                             LOGGER.warn("[CraftyAI] Blocked GIVE action for blacklisted item: {}", itemId);
                             if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, false, "blacklisted item");
                             continue;
@@ -1022,7 +1030,7 @@ public class CraftyAIMod implements ModInitializer {
                                 int amount = parts.length >= 3 ? Integer.parseInt(parts[2].trim()) : 1;
                                 amount = Math.max(1, Math.min(64, amount));
                                 runServerCommand(player, "give @s " + id + " " + amount);
-                                player.sendSystemMessage(Component.literal("§aReceived " + amount + "x " + parts[1]));
+                                player.sendSystemMessage(Component.literal("\u00A7aReceived " + amount + "x " + parts[1]));
                             }
                         } catch (Exception e) {
                             LOGGER.warn("[CraftyAI] Failed to process give command: {}", e.getMessage());
@@ -1038,7 +1046,7 @@ public class CraftyAIMod implements ModInitializer {
                             if (parts.length >= 3) duration = Math.max(1, Math.min(600, Integer.parseInt(parts[2].trim())));
                         } catch (NumberFormatException ignored) {}
                         runServerCommand(player, "effect give @s minecraft:" + effect + " " + duration);
-                        player.sendSystemMessage(Component.literal("§d✨ Applied " + effect + " for " + duration + "s"));
+                        player.sendSystemMessage(Component.literal("\u00A7d\u2728 Applied " + effect + " for " + duration + "s"));
                         if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     }
                 } else if (upper.startsWith("ENCHANT:")) {
@@ -1050,7 +1058,7 @@ public class CraftyAIMod implements ModInitializer {
                             if (parts.length >= 3) level = Math.max(1, Math.min(5, Integer.parseInt(parts[2].trim())));
                         } catch (NumberFormatException ignored) {}
                         runServerCommand(player, "enchant @s minecraft:" + enchant + " " + level);
-                        player.sendSystemMessage(Component.literal("§b✨ Enchanted with " + enchant + " " + level));
+                        player.sendSystemMessage(Component.literal("\u00A7b\u2728 Enchanted with " + enchant + " " + level));
                         if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     }
                 } else if (upper.startsWith("TP:")) {
@@ -1060,11 +1068,11 @@ public class CraftyAIMod implements ModInitializer {
                         String y = parts[2].trim();
                         String z = parts[3].trim();
                         runServerCommand(player, "tp @s " + x + " " + y + " " + z);
-                        player.sendSystemMessage(Component.literal("§d✨ Teleporting to " + x + ", " + y + ", " + z));
+                        player.sendSystemMessage(Component.literal("\u00A7d\u2728 Teleporting to " + x + ", " + y + ", " + z));
                         if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                     }
                 } else if (upper.startsWith("SCAN_BLOCKS:")) {
-                    // SCAN_BLOCKS:<radius>:<include_players>:<include_entities>:<include_blocks>
+
                     String[] parts = action.split(":", 5);
                     int radius = 8;
                     boolean incP = false, incE = true, incB = true;
@@ -1079,7 +1087,7 @@ public class CraftyAIMod implements ModInitializer {
                         if (loadedConfig.tier.equalsIgnoreCase("pro")) maxRadius = 16;
                         else if (loadedConfig.tier.equalsIgnoreCase("enterprise")) maxRadius = 32;
                     }
-                    // Per-player 30s cooldown (port from Spigot)
+
                     long nowMs = System.currentTimeMillis();
                     if (lastBlockScanTime.size() > MAX_BLOCK_SCAN_TRACKED) {
                         lastBlockScanTime.entrySet().removeIf(e -> nowMs - e.getValue() > BLOCK_SCAN_TTL_MS);
@@ -1095,18 +1103,22 @@ public class CraftyAIMod implements ModInitializer {
                         return lastScan;
                     });
                     if (scanResult[0] != 0 && nowMs - scanResult[0] < 30000L) {
-                        player.sendSystemMessage(Component.literal("§c§o[Block scan rate limit: wait " + ((30000L - (nowMs - scanResult[0])) / 1000) + "s]"));
+                        player.sendSystemMessage(Component.literal("\u00A7c\u00A7o[Block scan rate limit: wait " + ((30000L - (nowMs - scanResult[0])) / 1000) + "s]"));
                         if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, false, "rate_limited");
                         continue;
                     }
                     final int scanR = Math.min(radius, maxRadius);
                     final boolean fIncP = incP, fIncE = incE, fIncB = incB;
+                    final String fQuestion = originalQuestion;
+                    final ServerPlayer fPlayer = player;
                     player.level().getServer().execute(() -> {
-                        net.minecraft.core.BlockPos origin = player.blockPosition();
-                        net.minecraft.world.level.Level world = player.level();
-                        StringBuilder out = new StringBuilder("§b[Scan] §7radius=" + scanR + "\n");
+                        net.minecraft.core.BlockPos origin = fPlayer.blockPosition();
+                        net.minecraft.world.level.Level world = fPlayer.level();
+                        java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
+                        java.util.Map<String, Integer> mobCounts = new java.util.LinkedHashMap<>();
+                        java.util.List<String> nearbyPlayerNames = new ArrayList<>();
+                        int blockTotal = 0;
                         if (fIncB) {
-                            java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
                             for (int dx = -scanR; dx <= scanR; dx += 2) {
                                 for (int dy = -scanR; dy <= scanR; dy += 2) {
                                     for (int dz = -scanR; dz <= scanR; dz += 2) {
@@ -1114,52 +1126,105 @@ public class CraftyAIMod implements ModInitializer {
                                         net.minecraft.world.level.block.state.BlockState bs = world.getBlockState(bp);
                                         String name = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(bs.getBlock()).getPath().replace('_', ' ');
                                         counts.merge(name, 1, Integer::sum);
+                                        blockTotal++;
                                     }
                                 }
                             }
-                            counts.entrySet().stream()
-                                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                                .limit(8)
-                                .forEach(e -> out.append("§7  block: §f").append(e.getKey()).append(" §8x").append(e.getValue()).append("\n"));
                         }
                         if (fIncE) {
-                            int mob = 0;
                             for (net.minecraft.world.entity.LivingEntity e : world.getEntitiesOfClass(
                                     net.minecraft.world.entity.LivingEntity.class,
-                                    net.minecraft.world.phys.AABB.ofSize(origin.getCenter(), scanR * 2, scanR * 2, scanR * 2),
-                                    en -> en != player && !(en instanceof net.minecraft.world.entity.player.Player))) mob++;
-                            out.append("§7  mobs nearby: §f").append(mob).append("\n");
+                                    net.minecraft.world.phys.AABB.ofSize(new net.minecraft.world.phys.Vec3(origin.getX() + 0.5, origin.getY() + 0.5, origin.getZ() + 0.5), scanR * 2.0, scanR * 2.0, scanR * 2.0),
+                                    en -> en != fPlayer && !(en instanceof net.minecraft.world.entity.player.Player))) {
+                                String typeName = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath().replace('_', ' ');
+                                mobCounts.merge(typeName, 1, Integer::sum);
+                            }
                         }
                         if (fIncP) {
-                            int pl = 0;
                             for (net.minecraft.world.entity.player.Player e : world.getEntitiesOfClass(
                                     net.minecraft.world.entity.player.Player.class,
-                                    net.minecraft.world.phys.AABB.ofSize(origin.getCenter(), scanR * 2, scanR * 2, scanR * 2),
-                                    en -> en != player)) pl++;
-                            out.append("§7  players nearby: §f").append(pl).append("\n");
+                                    net.minecraft.world.phys.AABB.ofSize(new net.minecraft.world.phys.Vec3(origin.getX() + 0.5, origin.getY() + 0.5, origin.getZ() + 0.5), scanR * 2.0, scanR * 2.0, scanR * 2.0),
+                                    en -> en != fPlayer)) {
+                                String n = e.getName().getString();
+                                if (!nearbyPlayerNames.contains(n)) nearbyPlayerNames.add(n);
+                            }
                         }
-                        player.sendSystemMessage(Component.literal(out.toString().trim()));
+                        LOGGER.info("[CraftyAI] SCAN_BLOCKS r={} \u2014 {} blocks, {} mobs, {} players", scanR, blockTotal, mobCounts.values().stream().mapToInt(Integer::intValue).sum(), nearbyPlayerNames.size());
+
+                        StringBuilder scanCtx = new StringBuilder("[Block Scan Results]\n");
+                        scanCtx.append("Player position: ").append(origin.getX()).append(", ").append(origin.getY()).append(", ").append(origin.getZ()).append("\n");
+                        int solidAbove = 0;
+                        for (int dy = 1; dy <= 5; dy++) {
+                            if (!world.getBlockState(origin.offset(0, dy, 0)).isAir()) solidAbove++;
+                        }
+                        scanCtx.append("Underground: ").append(solidAbove >= 3 ? "yes" : "no").append("\n");
+                        scanCtx.append("Radius: ").append(scanR).append(" blocks\n");
+                        if (!counts.isEmpty()) {
+                            scanCtx.append("Blocks: ");
+                            int n = 0;
+                            for (java.util.Map.Entry<String, Integer> e : counts.entrySet()) {
+                                if (n++ >= 12) { scanCtx.append("+").append(counts.size() - 12).append(" more"); break; }
+                                if (n > 1) scanCtx.append(", ");
+                                scanCtx.append(e.getKey()).append(" x").append(e.getValue());
+                            }
+                            scanCtx.append("\n");
+                        }
+                        if (!mobCounts.isEmpty()) {
+                            scanCtx.append("Entities: ");
+                            int n = 0;
+                            for (java.util.Map.Entry<String, Integer> e : mobCounts.entrySet()) {
+                                if (n++ > 0) scanCtx.append(", ");
+                                scanCtx.append(e.getKey()).append(" x").append(e.getValue());
+                            }
+                            scanCtx.append("\n");
+                        }
+                        if (!nearbyPlayerNames.isEmpty()) {
+                            scanCtx.append("Players nearby: ").append(String.join(", ", nearbyPlayerNames)).append("\n");
+                        }
+                        scanCtx.append(com.demonz.craftyai.common.ScanFlow.privacyRules());
+
+                        String prompt = com.demonz.craftyai.common.ScanFlow.followUpPrompt(fQuestion);
+                        CompletableFuture.supplyAsync(() -> sendWithRetry(prompt, fPlayer.getName().getString(), scanCtx.toString(), new ArrayList<>(), 0))
+                                .thenAccept(responseBody -> {
+                                    fPlayer.level().getServer().execute(() -> {
+                                        String aiReply = null;
+                                        if (responseBody != null && !responseBody.startsWith("__ERROR__:")) {
+                                            updateTierFromResponse(responseBody);
+                                            try {
+                                                NeuralResponse res = GSON.fromJson(responseBody, NeuralResponse.class);
+                                                aiReply = res != null ? res.getAnswer() : null;
+                                            } catch (Exception ignored) {}
+                                        }
+                                        if (aiReply == null || aiReply.isEmpty()) {
+
+                                            LOGGER.warn("[CraftyAI] Scan follow-up unavailable ({})", responseBody == null ? "no response" : "error");
+                                            aiReply = "I scanned the area, but my thoughts got scrambled on the way back. Try again in a moment.";
+                                        }
+                                        fPlayer.sendSystemMessage(Component.literal("\u00A7b[" + aiName + "] \u00A77> \u00A7f" + aiReply));
+                                        resetCircuit();
+                                    });
+                                });
                     });
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                 } else if (upper.startsWith("SCHEDULE_TASK:")) {
-                    // SCHEDULE_TASK:<cron_expr>:<type>:<message>
+
                     String[] parts = action.split(":", 4);
                     if (parts.length < 4) {
-                        player.sendSystemMessage(Component.literal("§c[CraftyAI] Invalid schedule format. Use: SCHEDULE_TASK:<cron>:<type>:<message>"));
+                        player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Invalid schedule format. Use: SCHEDULE_TASK:<cron>:<type>:<message>"));
                         continue;
                     }
                     String cronExpr = parts[1].trim();
                     String actionType = parts[2].trim().toLowerCase();
                     String message = parts[3].trim();
                     if (!"chat".equals(actionType) && !"action".equals(actionType)) {
-                        player.sendSystemMessage(Component.literal("§c[CraftyAI] Schedule type must be 'chat' or 'action'"));
+                        player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Schedule type must be 'chat' or 'action'"));
                         continue;
                     }
                     final String fCron = cronExpr;
                     final String fType = actionType;
                     final String fMsg = message;
                     final String fName = message.length() > 40 ? message.substring(0, 40) + "..." : message;
-                    player.sendSystemMessage(Component.literal("§e[CraftyAI] Scheduling task..."));
+                    player.sendSystemMessage(Component.literal("\u00A7e[CraftyAI] Scheduling task..."));
                     final ServerPlayer fPlayer = player;
                     new Thread(() -> {
                         try {
@@ -1176,35 +1241,35 @@ public class CraftyAIMod implements ModInitializer {
                                 int ni = bodyStr.indexOf(taskName);
                                 String nameStr = ni >= 0 ? bodyStr.substring(ni + taskName.length(), bodyStr.indexOf("\"", ni + taskName.length())) : fName;
                                 fPlayer.level().getServer().execute(() ->
-                                    fPlayer.sendSystemMessage(Component.literal("§a[CraftyAI] Task scheduled: §f" + nameStr + "§a (every " + fCron + ")")));
+                                    fPlayer.sendSystemMessage(Component.literal("\u00A7a[CraftyAI] Task scheduled: \u00A7f" + nameStr + "\u00A7a (every " + fCron + ")")));
                             } else {
                                 String err = "\"error\":\"";
                                 int ei = bodyStr.indexOf(err);
                                 String errStr = ei >= 0 ? bodyStr.substring(ei + err.length(), bodyStr.indexOf("\"", ei + err.length())) : "HTTP " + resp.statusCode();
                                 fPlayer.level().getServer().execute(() ->
-                                    fPlayer.sendSystemMessage(Component.literal("§c[CraftyAI] Schedule failed: " + errStr)));
+                                    fPlayer.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Schedule failed: " + errStr)));
                             }
                         } catch (Exception e) {
                             fPlayer.level().getServer().execute(() ->
-                                fPlayer.sendSystemMessage(Component.literal("§c[CraftyAI] Schedule error: " + e.getMessage())));
+                                fPlayer.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Schedule error: " + e.getMessage())));
                         }
                     }, "CraftyAI-Schedule").start();
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
                 } else if (upper.startsWith("DELAYED_ACTION:")) {
-                    // DELAYED_ACTION:<seconds>:<inner_action>
+
                     String[] dParts = action.split(":", 3);
                     if (dParts.length < 3) {
-                        player.sendSystemMessage(Component.literal("§c[CraftyAI] Format: DELAYED_ACTION:<seconds>:<action>"));
+                        player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Format: DELAYED_ACTION:<seconds>:<action>"));
                         continue;
                     }
                     int delaySec = 0;
                     try { delaySec = Math.max(1, Math.min(300, Integer.parseInt(dParts[1].trim()))); } catch (NumberFormatException ignored) {}
                     String innerAction = dParts[2].trim();
                     if (delaySec <= 0 || innerAction.isEmpty()) {
-                        player.sendSystemMessage(Component.literal("§c[CraftyAI] Invalid delay or action"));
+                        player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Invalid delay or action"));
                         continue;
                     }
-                    player.sendSystemMessage(Component.literal("§e[CraftyAI] Will execute in " + delaySec + "s: §f" + innerAction));
+                    player.sendSystemMessage(Component.literal("\u00A7e[CraftyAI] Will execute in " + delaySec + "s: \u00A7f" + innerAction));
                     final String fInner = innerAction;
                     final ServerPlayer fP = player;
                     final String fKey = playerKey;
@@ -1214,7 +1279,7 @@ public class CraftyAIMod implements ModInitializer {
                     new Thread(() -> {
                         try { Thread.sleep(fDelay); } catch (InterruptedException ie) { return; }
                         fSrv.execute(() -> {
-                            fP.sendSystemMessage(Component.literal("§a[CraftyAI] Executing delayed action: §f" + fInner));
+                            fP.sendSystemMessage(Component.literal("\u00A7a[CraftyAI] Executing delayed action: \u00A7f" + fInner));
                             handleActionInternal(fP, fInner);
                         });
                     }, "CraftyAI-Delay").start();
@@ -1224,7 +1289,7 @@ public class CraftyAIMod implements ModInitializer {
                     if (cmd.startsWith("/")) cmd = cmd.substring(1);
                     cmd = normalizeLocateCommand(cmd);
                     if (!AgenticActions.isAllowedChatCommand(cmd)) {
-                        player.sendSystemMessage(Component.literal("§c[CraftyAI] Blocked unsafe AI command. Only /locate is allowed."));
+                        player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Blocked unsafe AI command. Only /locate is allowed."));
                         if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, false, "command not allowlisted");
                         continue;
                     }
@@ -1234,10 +1299,10 @@ public class CraftyAIMod implements ModInitializer {
                     srv.execute(() -> {
                         try {
                             srv.getCommands().performPrefixedCommand(p.createCommandSourceStack(), "/" + finalCmd);
-                            p.sendSystemMessage(Component.literal("§7[CraftyAI] Ran: /" + finalCmd));
+                            p.sendSystemMessage(Component.literal("\u00A77[CraftyAI] Ran: /" + finalCmd));
                         } catch (Exception e) {
-                            LOGGER.warn("[CraftyAI] CHAT command failed: " + finalCmd + " — " + e.getMessage());
-                            p.sendSystemMessage(Component.literal("§c[CraftyAI] Command failed: " + e.getMessage()));
+                            LOGGER.warn("[CraftyAI] CHAT command failed: " + finalCmd + " \u2014 " + e.getMessage());
+                            p.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Command failed: " + e.getMessage()));
                         }
                     });
                     if (auditLog != null) auditLog.log(player.getName().getString(), playerKey, serverId, action, true, "ok");
@@ -1286,7 +1351,7 @@ public class CraftyAIMod implements ModInitializer {
             HttpRequest.Builder requestBuilder;
 
             if (loadedConfig.custom_provider_enabled) {
-                // chat-completions-compatible provider: use /v1/chat/completions with messages array
+
                 List<Map<String, String>> messages = new ArrayList<>();
                 Map<String, String> systemMsg = new HashMap<>();
                 systemMsg.put("role", "system");
@@ -1317,10 +1382,9 @@ public class CraftyAIMod implements ModInitializer {
                         .timeout(Duration.ofSeconds(30))
                         .POST(HttpRequest.BodyPublishers.ofString(jsonPayload));
 
-                // Apply custom provider headers (no gateway-specific headers)
                 GatewayHttpClientHelper.applyCustomProvider(requestBuilder, effectiveUrl, effectiveKey, CLIENT_TYPE, serverId);
             } else {
-                // CraftyAI Gateway: use /v1/chat with gateway payload format
+
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("prompt", question);
                 payload.put("player_name", playerName);
@@ -1339,14 +1403,13 @@ public class CraftyAIMod implements ModInitializer {
                         .timeout(Duration.ofSeconds(30))
                         .POST(HttpRequest.BodyPublishers.ofString(jsonPayload));
 
-                // Apply gateway headers
                 GatewayHttpClientHelper.apply(requestBuilder, CLIENT_TYPE, serverId);
             }
 
             HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 if (loadedConfig.custom_provider_enabled) {
-                    // Parse chat-completions-compatible response and wrap in NeuralResponse format
+
                     try {
                         com.google.gson.JsonObject json = com.demonz.craftyai.common.JsonParserAdapter.parse(response.body()).getAsJsonObject();
                         com.google.gson.JsonArray choices = json.getAsJsonArray("choices");
@@ -1366,7 +1429,7 @@ public class CraftyAIMod implements ModInitializer {
                 }
                 return response.body();
             }
-            
+
             if (response.statusCode() == 429) {
                 String body = response.body();
                 if (body != null && body.contains("Daily request limit exceeded")) {
@@ -1478,7 +1541,7 @@ public class CraftyAIMod implements ModInitializer {
     }
 
     private void handleLinkCommand(ServerPlayer player) {
-        player.sendSystemMessage(Component.literal("§b[CraftyAI] §7Generating link code for Discord linking..."));
+        player.sendSystemMessage(Component.literal("\u00A7b[CraftyAI] \u00A77Generating link code for Discord linking..."));
         HttpRequest request = GatewayHttpClientHelper.apply(HttpRequest.newBuilder()
                 .uri(URI.create(gatewayUrl + "/v1/link-generate"))
                 .header("Authorization", "Bearer " + apiKey)
@@ -1494,36 +1557,32 @@ public class CraftyAIMod implements ModInitializer {
                                 com.google.gson.JsonObject json = com.demonz.craftyai.common.JsonParserAdapter.parse(response.body()).getAsJsonObject();
                                 String code = json.has("code") && !json.get("code").isJsonNull() ? json.get("code").getAsString() : "";
                                 if (!code.isEmpty()) {
-                                    player.sendSystemMessage(Component.literal("§a========================================="));
-                                    player.sendSystemMessage(Component.literal("§a [CraftyAI] DISCORD LINK CODE"));
-                                    player.sendSystemMessage(Component.literal("§a Code: §b" + code));
-                                    player.sendSystemMessage(Component.literal("§a Expiry: 15 minutes"));
-                                    player.sendSystemMessage(Component.literal("§a"));
-                                    player.sendSystemMessage(Component.literal("§a Tell your server owner to run:"));
-                                    player.sendSystemMessage(Component.literal("§a   /link " + code));
-                                    player.sendSystemMessage(Component.literal("§a in Discord to link this server."));
-                                    player.sendSystemMessage(Component.literal("§a========================================="));
+                                    player.sendSystemMessage(Component.literal("\u00A7a========================================="));
+                                    player.sendSystemMessage(Component.literal("\u00A7a [CraftyAI] DISCORD LINK CODE"));
+                                    player.sendSystemMessage(Component.literal("\u00A7a Code: \u00A7b" + code));
+                                    player.sendSystemMessage(Component.literal("\u00A7a Expiry: 15 minutes"));
+                                    player.sendSystemMessage(Component.literal("\u00A7a"));
+                                    player.sendSystemMessage(Component.literal("\u00A7a Tell your server owner to run:"));
+                                    player.sendSystemMessage(Component.literal("\u00A7a   /link " + code));
+                                    player.sendSystemMessage(Component.literal("\u00A7a in Discord to link this server."));
+                                    player.sendSystemMessage(Component.literal("\u00A7a========================================="));
                                 } else {
-                                    player.sendSystemMessage(Component.literal("§c[CraftyAI] No link code returned."));
+                                    player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] No link code returned."));
                                 }
                             } catch (Exception e) {
-                                player.sendSystemMessage(Component.literal("§c[CraftyAI] Failed to parse link response."));
+                                player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Failed to parse link response."));
                             }
                         } else {
-                            player.sendSystemMessage(Component.literal("§c[CraftyAI] Link code generation failed (HTTP " + response.statusCode() + ")."));
+                            player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Link code generation failed (HTTP " + response.statusCode() + ")."));
                         }
                     });
                 })
                 .exceptionally(e -> {
-                    player.level().getServer().execute(() -> player.sendSystemMessage(Component.literal("§c[CraftyAI] Link failed: " + e.getMessage())));
+                    player.level().getServer().execute(() -> player.sendSystemMessage(Component.literal("\u00A7c[CraftyAI] Link failed: " + e.getMessage())));
                     return null;
                 });
     }
 
-    /**
-     * Client-side action inference: when the LLM truncates the action field,
-     * infer the action from the player's question and the AI's text response.
-     */
     public String inferActionFromText(String answer, String question) {
         if (answer == null || question == null) return null;
         String la = answer.toLowerCase();

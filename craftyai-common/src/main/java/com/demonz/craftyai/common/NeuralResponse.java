@@ -13,40 +13,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import com.google.gson.annotations.SerializedName;
 
-/**
- * Shared Response Model for CraftyAI Neural Engine
- * ===============================================
- * Used across Spigot, Fabric, and Forge to parse AI responses consistently.
- */
 public class NeuralResponse {
     public String answer;
     public String response;
-    
+
     @SerializedName("action_trigger")
     public String actionTrigger;
     public String action;
-    
+
     public String source;
-    
+
     @SerializedName("tokens_used")
     public int tokensUsed;
 
-    /**
-     * Gets the textual response from the AI, prioritizing the 'response' field.
-     */
     public String getAnswer() {
         if (response != null && !response.isEmpty()) return response;
         return answer;
     }
 
-    /**
-     * Gets the action trigger, prioritizing 'action_trigger'.
-     */
     public String getAction() {
         if (actionTrigger != null && !actionTrigger.isEmpty() && !"null".equalsIgnoreCase(actionTrigger)) return actionTrigger;
         if (action != null && !action.isEmpty() && !"null".equalsIgnoreCase(action)) return action;

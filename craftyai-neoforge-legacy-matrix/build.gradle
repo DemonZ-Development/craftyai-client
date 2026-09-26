@@ -1,0 +1,68 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.gradle.userdev' version '7.1.38'
+}
+version = '1.4.0'
+group = 'com.demonz'
+def mc = providers.gradleProperty('minecraftVersion').get()
+def target = new groovy.json.JsonSlurper().parse(rootProject.file('loader-targets.json')).targets.find { it.minecraft == mc }
+if (!(mc in ['1.20.4', '1.20.5', '1.20.6']) || target?.neoforge == null) throw new GradleException("No legacy NeoForge target for ${mc}")
+def sourceModule = mc == '1.20.4' ? 'craftyai-forge' : 'craftyai-forge-1206'
+def javaVersion = mc == '1.20.4' ? 17 : 21
+base.archivesName = "craftyai-neoforge-mc${mc}"
+layout.buildDirectory = layout.projectDirectory.dir("build/mc${mc}")
+java { toolchain.languageVersion = JavaLanguageVersion.of(javaVersion) }
+tasks.withType(JavaCompile).configureEach { options.release = javaVersion; options.encoding = 'UTF-8' }
+repositories { mavenCentral() }
+dependencies {
+    implementation "net.neoforged:neoforge:${target.neoforge}"
+    implementation project(':craftyai-common')
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+def sources = tasks.register('prepareMappedSources', Sync) {
+    inputs.property('minecraftVersion', mc)
+    inputs.file(project.buildFile)
+    from rootProject.file("${sourceModule}/src/main/java")
+    into layout.buildDirectory.dir('generated/sources/compat')
+    filteringCharset = 'UTF-8'
+    filter { line ->
+        line = line.replace('net.minecraftforge.fml.', 'net.neoforged.fml.')
+                .replace('net.minecraftforge.api.', 'net.neoforged.api.')
+                .replace('net.minecraftforge.eventbus.api.', 'net.neoforged.bus.api.')
+                .replace('net.minecraftforge.', 'net.neoforged.neoforge.')
+                .replace('MinecraftForge', 'NeoForge')
+                .replace('public CraftyAIForgeMod() {', 'public CraftyAIForgeMod(net.neoforged.bus.api.IEventBus modEventBus) {')
+                .replace('FMLJavaModLoadingContext.get().getModEventBus()', 'modEventBus')
+                .replace('import net.neoforged.fml.javafmlmod.FMLJavaModLoadingContext;', '')
+        line = line.replace('import net.neoforged.neoforge.registries.ForgeRegistries;', 'import net.minecraft.core.registries.BuiltInRegistries;')
+                .replace('net.neoforged.neoforge.registries.ForgeRegistries.ITEMS.getValue(', 'net.minecraft.core.registries.BuiltInRegistries.ITEM.get(')
+                .replace('ForgeRegistries.BLOCKS', 'BuiltInRegistries.BLOCK')
+                .replace('ForgeRegistries.ENTITY_TYPES', 'BuiltInRegistries.ENTITY_TYPE')
+        if (mc != '1.20.4') {
+            line = line.replace('Mod.EventBusSubscriber', 'net.neoforged.fml.common.EventBusSubscriber')
+                    .replace('.Bus.FORGE', '.Bus.GAME')
+                    .replace('import net.neoforged.neoforge.event.TickEvent;', 'import net.neoforged.neoforge.client.event.ClientTickEvent;')
+                    .replace('TickEvent.ClientTickEvent event', 'ClientTickEvent.Post event')
+                    .replace('if (event.phase != TickEvent.Phase.END) return;', '')
+                    .replace('new net.neoforged.neoforge.client.ConfigScreenHandler.ConfigScreenFactory((mc, parent) -> new CraftyAIForgeSettingsScreen(parent))', '(mc, parent) -> new CraftyAIForgeSettingsScreen(parent)')
+                    .replace('net.neoforged.neoforge.client.ConfigScreenHandler.ConfigScreenFactory', 'net.neoforged.neoforge.client.gui.IConfigScreenFactory')
+        }
+        return line
+    }
+}
+sourceSets.main {
+    java.srcDir sources
+    java.srcDir project(':craftyai-common').file('src/main/java')
+    resources.srcDir rootProject.file("${sourceModule}/src/main/resources")
+}
+processResources {
+    inputs.properties(minecraftVersion: mc, neoVersion: target.neoforge)
+    filesMatching('META-INF/mods.toml') {
+        if (mc != '1.20.4') name = 'neoforge.mods.toml'
+        filter { line -> line.replace('modId = "forge"', 'modId = "neoforge"')
+                .replace('[49.0.0,)', "[${target.neoforge},)").replace('[50.2.10,)', "[${target.neoforge},)").replace('[49,)', '[1,)').replace('[50,)', '[1,)')
+                .replace('mandatory = true', 'type = "required"')
+                .replace('[1.20.4]', "[${mc}]").replace('[1.20.6]', "[${mc}]") }
+    }
+}
+jar { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }

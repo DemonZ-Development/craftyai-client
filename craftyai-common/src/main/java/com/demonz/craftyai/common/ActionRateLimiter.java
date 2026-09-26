@@ -13,17 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-
-/**
- * Per-player sliding-window rate limiter for agentic actions.
- * Default: 5 actions per 60 seconds per player.
- * Thread-safe; lock-free via ConcurrentHashMap + AtomicInteger.
- */
 public final class ActionRateLimiter {
     private final long windowMs;
     private final int maxPerWindow;
@@ -38,12 +31,6 @@ public final class ActionRateLimiter {
         this.maxPerWindow = Math.max(1, maxPerWindow);
         this.windowMs = Math.max(1_000L, windowMs);
     }
-
-    /**
-     * Check if a player may perform an action right now.
-     * If allowed, records the action and returns true.
-     * If denied, returns false (no record incremented).
-     */
     private int purgeCounter = 0;
 
     public boolean tryAcquire(String playerKey) {
@@ -51,7 +38,6 @@ public final class ActionRateLimiter {
         long now = System.currentTimeMillis();
         Window w = windows.computeIfAbsent(playerKey, k -> new Window(now));
         synchronized (w) {
-            // Reset window if expired
             if (now - w.windowStart.get() >= windowMs) {
                 w.windowStart.set(now);
                 w.count.set(0);
@@ -60,17 +46,12 @@ public final class ActionRateLimiter {
                 return false;
             }
             w.count.incrementAndGet();
-            // Periodic purge: every 100 calls, evict stale entries
             if (++purgeCounter % 100 == 0) {
                 purgeExpired();
             }
             return true;
         }
     }
-
-    /**
-     * Get remaining actions in the current window for a player. For display purposes.
-     */
     public int remaining(String playerKey) {
         if (playerKey == null || playerKey.isEmpty()) return maxPerWindow;
         long now = System.currentTimeMillis();
@@ -82,9 +63,6 @@ public final class ActionRateLimiter {
         }
     }
 
-    /**
-     * Get seconds until the player's current window resets. 0 if window already expired.
-     */
     public long secondsUntilReset(String playerKey) {
         if (playerKey == null || playerKey.isEmpty()) return 0;
         Window w = windows.get(playerKey);
@@ -98,17 +76,11 @@ public final class ActionRateLimiter {
 
     public int getMaxPerWindow() { return maxPerWindow; }
     public long getWindowMs() { return windowMs; }
-
-    /**
-     * Evict stale entries (windows that have expired) to prevent unbounded map growth.
-     * Call periodically (e.g., every 100 requests) or from a background timer.
-     */
     public void purgeExpired() {
         long now = System.currentTimeMillis();
         if (windows.size() > MAX_TRACKED_KEYS) {
             windows.entrySet().removeIf(e -> now - e.getValue().windowStart.get() >= windowMs);
         }
-        // Always trim if still too large after TTL eviction
         if (windows.size() > MAX_TRACKED_KEYS * 2) {
             windows.entrySet().removeIf(e -> true);
             windows.clear();

@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai.common;
 
 import java.io.IOException;
@@ -26,14 +25,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.function.Consumer;
 
-/**
- * Append-only audit log for agentic actions.
- * Writes a single line per action to both the logger and a rotating daily log file:
- *   <configDir>/craftyai-audit-YYYY-MM-DD.log
- *
- * Each line format:
- *   ISO8601_TIMESTAMP | player=NAME | uuid=UUID | server=SERVER_ID | action=ACTION | result=OK|FAIL | detail=DETAIL
- */
 public final class ActionAuditLog {
     private final Path logDir;
     private final Consumer<String> logger;
@@ -76,7 +67,7 @@ public final class ActionAuditLog {
 
     private static String sanitize(String s) {
         if (s == null) return "-";
-        // Strip pipe characters to keep CSV-ish format intact
+
         return s.replace('|', '_').replace('\n', '_').replace('\r', '_');
     }
 }

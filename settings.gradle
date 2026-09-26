@@ -1,4 +1,12 @@
 pluginManagement {
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'net.fabricmc.fabric-loom' &&
+                    settings.startParameter.projectProperties.get('minecraftVersion') == '26.3') {
+                useVersion('1.17.21')
+            }
+        }
+    }
     repositories {
         maven {
             name = 'Fabric'
@@ -6,6 +14,8 @@ pluginManagement {
         }
         gradlePluginPortal()
         mavenCentral()
+        maven { url = 'https://maven.neoforged.net/releases' }
+        maven { url = 'https://maven.minecraftforge.net/' }
     }
 }
 
@@ -15,36 +25,35 @@ plugins {
 
 rootProject.name = 'craftyai-client'
 
-// Always include shared library
 include 'craftyai-common'
 
-// Module inclusion controlled by Gradle property -Ptarget=<legacy|modern>
-// CI passes the correct target for each build job.
-// Default: auto-detect based on Gradle version.
 def target = startParameter.projectProperties.get('target') ?: providers.gradleProperty('target').getOrElse('auto')
 
-if (target == 'forge-only') {
-    // Forge-only: Build Forge mod standalone (no fabric-loom conflict)
+if (target == 'forge-modern-matrix') {
+    include 'craftyai-forge-modern-matrix'
+} else if (target == 'neoforge-legacy-matrix') {
+    include 'craftyai-neoforge-legacy-matrix'
+} else if (target == 'neoforge-matrix') {
+    include 'craftyai-neoforge-matrix'
+} else if (target == 'forge-matrix') {
+    include 'craftyai-forge-matrix'
+} else if (target == 'fabric-matrix') {
+    include 'craftyai-fabric-matrix'
+} else if (target == 'forge-only') {
     include 'craftyai-forge'
 } else if (target == 'forge1206') {
-    // Legacy Forge mod for MC 1.20.6 (Gradle 8.x, Java 21, ForgeGradle 6)
     include 'craftyai-forge-1206'
 } else if (target == 'legacy') {
-    // Legacy mods: Fabric 1.20 + Forge (Gradle 8.x, Java 17, Loom 1.7.4)
     include 'craftyai-fabric'
     include 'craftyai-forge'
 } else if (target == 'modern') {
-    // Modern mods: Fabric 26 & NeoForge 26 (Gradle 9.x, Java 25)
     include 'craftyai-fabric-26'
     include 'craftyai-forge-26'
 } else if (target == 'fabric26') {
-    // Fabric 26 mod (Gradle 9.x, Java 25, Loom)
     include 'craftyai-fabric-26'
 } else if (target == 'forge26') {
-    // NeoForge 26 mod (Gradle 9.x, Java 25, ModDevGradle)
     include 'craftyai-forge-26'
 } else {
-    // Auto: include what's compatible with current Gradle version
     if (GradleVersion.current() >= GradleVersion.version('9.0')) {
         include 'craftyai-fabric-26'
         include 'craftyai-forge-26'

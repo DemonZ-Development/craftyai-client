@@ -13,483 +13,191 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.demonz.craftyai;
 
-import com.demonz.craftyai.common.CraftyAIConfig;
-import com.demonz.craftyai.common.GatewayRequestHeaders;
-import com.demonz.craftyai.common.SessionManager;
+import com.demonz.craftyai.common.*;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.StringWidget;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
-import net.minecraft.network.chat.TextColor;
 import net.minecraftforge.fml.loading.FMLPaths;
+import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-
-/**
- * CraftyAI Settings Screen for Forge 1.20+ (Mojang mappings).
- * Compact layout designed to fit at GUI scale 2 on 1080p.
- * v1.1.1-beta: refresh button, decorative emoji, key validation, tier badge.
- */
 public class CraftyAIForgeSettingsScreen extends Screen {
-    private static final String CLIENT_TYPE = "minecraft-forge-client";
-    private static final int W = 280;
-    private static final int FH = 20;
-    private static final int GAP = 2;
-    private static final int LBL = 10;
-    private static final int PAD = 10;
-
     private final Screen parent;
-    private EditBox apiKeyField;
-    private EditBox aiNameField;
-    private EditBox providerUrlField;
-    private EditBox providerKeyField;
-    private volatile String status = "";
-    private volatile int statusColor = 0x55FFFF;
-    private int contentH;
-    private String lastKeyTestResult = null;
-    private int lastKeyTestColor = 0xAAAAAA;
-
-    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("craftyai-client");
+    private SettingsDraft draft;
+    private int page;
+    private boolean reveal, busy, closed;
+    private String status = "Changes apply when you save.";
+    private int left, top, w, h;
+    private static final int ACCENT = 0xFFE2DFD5;
 
     public CraftyAIForgeSettingsScreen(Screen parent) {
         super(Component.literal("CraftyAI Settings"));
         this.parent = parent;
     }
 
-    @Override
-    protected void init() {
-        CraftyAIConfig cfg = CraftyAIForgeModClient.getConfig();
-        contentH = calcHeight(cfg);
-        int left = (this.width - W) / 2;
-        int y = Math.max(4, (this.height - contentH) / 2);
+    @Override protected void init() {
+        if (draft == null) draft = new SettingsDraft(CraftyAIForgeModClient.getConfig());
+        w = Math.min(380, this.width - 32);
+        h = Math.min(272, this.height - 12);
+        left = (this.width - w) / 2; top = (this.height - h) / 2;
+        addRenderableOnly((g, mx, my, delta) -> {
+            g.fill(0, 0, this.width, this.height, 0x99121110);
+            g.fill(left - 10, top, left + w + 10, top + h, 0xF0242320);
+        });
+        label(left, top + 10, "CRAFTY AI", ACCENT, w / 2);
+        label(left + w / 2, top + 10, "Settings / " + new String[]{"General", "Connection", "Provider"}[page], 0xFFAFBDCC, w / 2);
+        int tabW = (w - 8) / 3;
+        String[] tabs = {"General", "Connection", "Provider"};
+        for (int i = 0; i < tabs.length; i++) {
+            final int tab = i;
+            button(left + i * (tabW + 4), top + 28, tabW, (page == i ? "> " : "") + tabs[i], () -> {
+                page = tab; reveal = false; rebuild();
+            }, true);
+        }
+        int y = top + 56;
+        if (page == 0) general(y);
+        else if (page == 1) connection(y);
+        else provider(y);
 
-        // Title with tier and Auto-Mint button
-        int accent = tierColor(cfg.tier);
-        addRenderableWidget(new StringWidget(left, y + 4, W - 110, 10,
-                Component.literal("\u00A7b\u2726 CraftyAI \u00A78\u2014 \u00A7r" + cap(cfg.tier))
-                        .withStyle(Style.EMPTY.withColor(TextColor.fromRgb(accent))), this.font));
+        label(left, top + h - 46, status, 0xFFB7CBD7, w);
+        int third = (w - 8) / 3;
+        button(left, top + h - 30, third, "Reset edits", () -> {
+            draft = new SettingsDraft(CraftyAIForgeModClient.getConfig()); reveal = false;
+            status = "Unsaved edits reset."; rebuild();
+        }, !busy);
+        button(left + third + 4, top + h - 30, third, "Cancel", this::onClose, true);
+        button(left + 2 * (third + 4), top + h - 30, third, "Save & close", this::save, !busy);
+    }
 
-        Button autoMintBtn = Button.builder(Component.literal("\u26A1 Auto-Mint Key"), btn -> {
-            btn.setMessage(Component.literal("Minting..."));
-            btn.active = false;
-            CraftyAIForgeModClient.performAutoMintKey(mintedKey -> {
-                if (mintedKey != null) {
-                    if (apiKeyField != null) {
-                        apiKeyField.setValue(mintedKey);
-                    }
-                    btn.setMessage(Component.literal("\u2705 Key Minted!"));
-                } else {
-                    btn.setMessage(Component.literal("\u274C Mint Failed"));
-                    btn.active = true;
-                }
+    private void general(int y) {
+        label(left, y, "Assistant name", 0xFFAFBDCC, w);
+        field(left, y + 12, w, draft.name, 32, false, value -> draft.name = value);
+        button(left, y + 40, w, "Connection mode: " + (draft.local ? "Offline" : "Online"), () -> {
+            draft.local = !draft.local; rebuild();
+        }, !busy);
+        int half = (w - 4) / 2;
+        button(left, y + 66, half, "Game actions: " + (draft.actions ? "On" : "Off"), () -> {
+            draft.actions = !draft.actions; rebuild();
+        }, !busy);
+        button(left + half + 4, y + 66, half, "Ask before risky: " + (draft.confirmation ? "Yes" : "No"), () -> {
+            draft.confirmation = !draft.confirmation; rebuild();
+        }, !busy);
+        label(left, y + 99, "Multiplayer servers control their own actions.", 0xFF8D9DAE, w);
+        label(left, y + 111, "Cloud access and custom providers need internet.", 0xFF8D9DAE, w);
+    }
+
+    private void connection(int y) {
+        label(left, y, "CraftyAI API key", 0xFFAFBDCC, w);
+        field(left, y + 12, w - 74, draft.apiKey, 256, !reveal, value -> draft.apiKey = value);
+        button(left + w - 70, y + 12, 70, reveal ? "Hide" : "Show / edit", () -> { reveal = !reveal; rebuild(); }, !busy);
+        int half = (w - 4) / 2;
+        button(left, y + 40, half, "Create free key", () -> {
+            String session = sessionId();
+            run(() -> SettingsConnection.gateway("", "minecraft-forge-client", session, true), key -> {
+                draft.apiKey = key; status = "Key created. Save to keep it.";
             });
-        }).bounds(left + W - 110, y, 110, 16).build();
-        addRenderableWidget(autoMintBtn);
-        y += 18;
-
-        // API Key (masked when unfocused)
-        apiKeyField = new EditBox(this.font, left, y + LBL, W, FH, Component.literal("API Key")) {
-            private String real = cfg.api_key == null ? "" : cfg.api_key;
-            {
-                this.setResponder(text -> {
-                    if (this.isFocused()) {
-                        this.real = text;
-                        lastKeyTestResult = null;
-                    }
-                });
-            }
-            @Override public void setValue(String t) { real = t; super.setValue(isFocused() ? t : mask(t)); }
-            @Override public String getValue() { return real; }
-            @Override public void setFocused(boolean f) { super.setFocused(f); super.setValue(f ? real : mask(real)); }
-            private String mask(String k) {
-                if (k == null || k.isEmpty()) return "";
-                if (k.length() <= 8) return "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
-                return k.substring(0, 4) + "\u2022\u2022\u2022\u2022" + k.substring(k.length() - 4);
-            }
-        };
-        apiKeyField.setMaxLength(256);
-        apiKeyField.setHint(Component.literal("cai_xxxxxxxx..."));
-        apiKeyField.setValue(cfg.api_key == null ? "" : cfg.api_key);
-        addRenderableWidget(apiKeyField);
-        y += LBL + FH + GAP;
-
-        // AI Name
-        aiNameField = new EditBox(this.font, left, y + LBL, W, FH, Component.literal("AI Name"));
-        aiNameField.setMaxLength(256);
-        aiNameField.setHint(Component.literal("Assistant name"));
-        aiNameField.setValue(cfg.ai_name == null ? "Crafty" : cfg.ai_name);
-        addRenderableWidget(aiNameField);
-        y += LBL + FH + GAP;
-
-        // Mode toggle
-        addRenderableWidget(Button.builder(modeText(cfg), b -> {
-            cfg.force_local_mode = !cfg.force_local_mode;
-            b.setMessage(modeText(cfg));
-        }).bounds(left, y, W, FH).build());
-        y += FH + GAP;
-
-        // Custom Provider toggle
-        addRenderableWidget(Button.builder(cpText(cfg), b -> {
-            cfg.custom_provider_enabled = !cfg.custom_provider_enabled;
-            preserveAndRebuild();
-        }).bounds(left, y, W, FH).build());
-        y += FH + GAP;
-
-        // Provider URL & Key (only when enabled)
-        if (cfg.custom_provider_enabled) {
-            providerUrlField = new EditBox(this.font, left, y + LBL, W, FH, Component.literal("URL"));
-            providerUrlField.setMaxLength(256);
-            providerUrlField.setHint(Component.literal("https://api.example.com"));
-            providerUrlField.setValue(cfg.custom_provider_url == null ? "" : cfg.custom_provider_url);
-            addRenderableWidget(providerUrlField);
-            y += LBL + FH + GAP;
-
-            providerKeyField = new EditBox(this.font, left, y + LBL, W, FH, Component.literal("Key"));
-            providerKeyField.setMaxLength(256);
-            providerKeyField.setHint(Component.literal("Provider API key"));
-            providerKeyField.setValue(cfg.custom_provider_key == null ? "" : cfg.custom_provider_key);
-            addRenderableWidget(providerKeyField);
-            y += LBL + FH + GAP;
-        }
-
-        // Agentic Tasks (free for all tiers — only config toggle)
-        addRenderableWidget(Button.builder(agenticText(cfg), b -> {
-            cfg.agentic_tasks_enabled = !cfg.agentic_tasks_enabled;
-            b.setMessage(agenticText(cfg));
-        }).bounds(left, y, W, FH).build());
-        y += FH + GAP;
-
-        // Session ID + Copy + Refresh
-        int copyW = 50;
-        int refreshW = 56;
-        addRenderableWidget(Button.builder(Component.literal("\uD83D\uDCCB Copy"), b -> {
+        }, !busy);
+        button(left + half + 4, y + 40, half, "Test connection", () -> {
+            String key = draft.apiKey.trim(); String session = sessionId();
+            if (!key.matches("^cai_[a-zA-Z0-9_-]{16,128}$")) { status = "Enter a valid CraftyAI key first."; rebuild(); return; }
+            run(() -> SettingsConnection.gateway(key, "minecraft-forge-client", session, false), message -> status = message);
+        }, !busy);
+        button(left, y + 66, w, "Copy session ID", () -> {
             Minecraft.getInstance().keyboardHandler.setClipboard(sessionId());
-            status = "\u00A7a\u2705 Session ID copied!";
-            statusColor = 0x55FF55;
-        }).bounds(left + W - copyW, y, copyW, FH).build());
-        addRenderableWidget(Button.builder(Component.literal("\uD83D\uDD04 Reload"), b -> {
-            CraftyAIForgeModClient.reloadConfig();
-            lastKeyTestResult = null;
-            status = "\u00A7a\u2705 Reloaded from disk";
-            statusColor = 0x55FF55;
-            this.clearWidgets();
-            this.init();
-        }).bounds(left + W - copyW - refreshW - GAP, y, refreshW, FH).build());
-        y += FH + GAP;
-
-        // Save / Done
-        int half = (W - GAP) / 2;
-        addRenderableWidget(Button.builder(Component.literal("\u00A7a\u00A7l\uD83D\uDCBE Save"), b -> save()).bounds(left, y, half, FH).build());
-        addRenderableWidget(Button.builder(Component.literal("\u00A7f\u2715 Done"), b -> onClose()).bounds(left + half + GAP, y, half, FH).build());
-        y += FH + GAP;
-
-        // Test Connection
-        if (cfg.custom_provider_enabled) {
-            addRenderableWidget(Button.builder(Component.literal("\uD83D\uDD0C Test Provider"), b -> testProvider()).bounds(left, y, W, FH).build());
-        } else {
-            addRenderableWidget(Button.builder(Component.literal("\uD83D\uDD17 Test Connection \u00A77(\u00A7fkey check\u00A77)"), b -> testGateway()).bounds(left, y, W, FH).build());
-        }
+            status = "Session ID copied."; rebuild();
+        }, true);
+        label(left, y + 99, "Keys are hidden by default. Keep them private.", 0xFF8D9DAE, w);
+        label(left, y + 111, "Support: craftyai.pages.dev", 0xFF8D9DAE, w);
     }
 
-    // --- Layout ---
-
-    private int calcHeight(CraftyAIConfig cfg) {
-        int h = 16 + (LBL + FH + GAP) * 2 + (FH + GAP) * 5 + FH + 2;
-        if (cfg.custom_provider_enabled) h += (LBL + FH + GAP) * 2;
-        return h;
+    private void provider(int y) {
+        button(left, y, w, "Custom provider: " + (draft.provider ? "Enabled" : "Disabled"), () -> {
+            draft.provider = !draft.provider; rebuild();
+        }, !busy);
+        label(left, y + 26, "Endpoint URL", 0xFFAFBDCC, w);
+        field(left, y + 38, w, draft.url, 512, false, value -> draft.url = value);
+        int half = (w - 4) / 2;
+        label(left, y + 62, "Provider key", 0xFFAFBDCC, half);
+        label(left + half + 4, y + 62, "Model ID", 0xFFAFBDCC, half);
+        field(left, y + 74, half, draft.providerKey, 512, !reveal, value -> draft.providerKey = value);
+        field(left + half + 4, y + 74, half, draft.model, 256, false, value -> draft.model = value);
+        button(left, y + 100, half, reveal ? "Hide key" : "Show / edit key", () -> { reveal = !reveal; rebuild(); }, !busy);
+        button(left + half + 4, y + 100, half, "Test provider", () -> {
+            String url = draft.url.trim(), key = draft.providerKey.trim();
+            try { SettingsDraft.providerBaseUrl(url); }
+            catch (IllegalArgumentException e) { status = e.getMessage(); rebuild(); return; }
+            run(() -> SettingsConnection.provider(url, key), message -> status = message);
+        }, !busy);
     }
 
-    private void preserveAndRebuild() {
-        CraftyAIConfig cfg = CraftyAIForgeModClient.getConfig();
-        if (apiKeyField != null) cfg.api_key = apiKeyField.getValue().trim();
-        if (aiNameField != null) cfg.ai_name = aiNameField.getValue().trim();
-        if (providerUrlField != null) cfg.custom_provider_url = providerUrlField.getValue().trim();
-        if (providerKeyField != null) cfg.custom_provider_key = providerKeyField.getValue().trim();
-        this.clearWidgets();
-        this.init();
+    private void field(int x, int y, int width, String value, int limit, boolean hidden, Consumer<String> change) {
+        EditBox input = new EditBox(this.font, x, y, width, 20, Component.literal(hidden ? "Hidden API key" : "Setting"));
+        input.setMaxLength(limit);
+        input.setValue(hidden ? (value.isEmpty() ? "No key configured" : "********") : value);
+        input.setEditable(!hidden && !busy); input.active = !hidden && !busy;
+
+        if (!hidden) input.setResponder(change);
+        addRenderableWidget(input);
     }
 
-    // --- Text helpers ---
-
-    private static boolean isProTier(CraftyAIConfig c) {
-        return "pro".equalsIgnoreCase(c.tier) || "enterprise".equalsIgnoreCase(c.tier);
+    private void button(int x, int y, int width, String text, Runnable action, boolean enabled) {
+        Button b = Button.builder(Component.literal(text), ignored -> action.run()).bounds(x, y, width, 20).build();
+        b.active = enabled; addRenderableWidget(b);
     }
 
-    private static boolean isEnterpriseTier(CraftyAIConfig c) {
-        return "enterprise".equalsIgnoreCase(c.tier);
+    private void label(int x, int y, String text, int color, int width) {
+        addRenderableOnly((g, mx, my, delta) -> g.drawString(this.font, this.font.plainSubstrByWidth(text, width), x, y, color));
     }
+    private void rebuild() {
 
-    private static Component modeText(CraftyAIConfig c) {
-        return Component.literal((c.force_local_mode ? "\uD83C\uDF24" : "\u2601\uFE0F") + " Mode: " + (c.force_local_mode ? "\u00A7eLocal Only" : "\u00A7aCloud"));
+        Minecraft.getInstance().execute(() -> {
+            if (closed) return;
+            this.setFocused(null);
+            this.clearWidgets(); this.init();
+        });
     }
-
-    private static Component cpText(CraftyAIConfig c) {
-        return Component.literal("\uD83D\uDD0C Custom Provider: " + (c.custom_provider_enabled ? "\u00A7aEnabled" : "\u00A77Disabled"));
-    }
-
-    private static Component agenticText(CraftyAIConfig c) {
-        return Component.literal("\u26A1 Agentic Tasks: " + (c.agentic_tasks_enabled ? "\u00A7aEnabled \u2705" : "\u00A77Disabled"));
-    }
-
-    private static String cap(String s) {
-        if (s == null || s.isEmpty()) return "Free";
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
-    }
-
-    private static int tierColor(String tier) {
-        if (tier == null) return 0xAAAAAA;
-        return switch (tier.toLowerCase()) {
-            case "enterprise" -> 0xC77DFF; // purple
-            case "pro" -> 0xFFD700;        // gold
-            case "starter" -> 0x55C7FF;    // cyan
-            default -> 0xAAAAAA;           // gray (free/trial/unknown)
-        };
-    }
-
-    private String shortId(String s) {
-        return s == null || s.isBlank() ? "N/A" : s.length() <= 18 ? s : s.substring(0, 8) + "..." + s.substring(s.length() - 6);
-    }
-
     private String sessionId() { return SessionManager.getSessionId(FMLPaths.CONFIGDIR.get()); }
 
-    // --- Actions ---
+    private void run(Callable<String> operation, Consumer<String> success) {
+        if (busy) return;
+        busy = true; status = "Connecting..."; rebuild();
+        SettingsConnection.run(operation).whenComplete((result, failure) -> Minecraft.getInstance().execute(() -> {
+            if (closed) return;
+            busy = false;
+            if (failure == null) success.accept(result);
+            else status = "Connection failed. Check settings and try again.";
+            rebuild();
+        }));
+    }
 
     private void save() {
-        CraftyAIConfig cfg = CraftyAIForgeModClient.getConfig();
-        String key = apiKeyField.getValue().trim();
-        if (key.isEmpty()) { status = "\u00A7c\u274C API key required"; statusColor = 0xFF5555; return; }
-        if (!key.matches("^cai_[a-zA-Z0-9_-]{16,128}$")) {
-            status = "\u00A7c\u274C Invalid API key format (must start with cai_)";
-            statusColor = 0xFF5555;
-            return;
+        String problem = draft.validate();
+        if (problem != null) { status = problem; rebuild(); return; }
+        CraftyAIConfig live = CraftyAIForgeModClient.getConfig();
+        CraftyAIConfig next = draft.applyTo(live);
+        if (!ConfigLoader.saveConfig(FMLPaths.CONFIGDIR.get().toString(), "craftyai.json", next, message -> {})) {
+            status = "Could not save. Check config folder permissions."; rebuild(); return;
         }
-
-        if (cfg.custom_provider_enabled && providerUrlField != null) {
-            String url = providerUrlField.getValue().trim();
-            if (!url.isEmpty() && !url.startsWith("http://") && !url.startsWith("https://")) {
-                status = "\u00A7c\u274C URL must start with http:// or https://"; statusColor = 0xFF5555; return;
-            }
+        live.copyFrom(next);
+        if (Minecraft.getInstance().getSingleplayerServer() != null && CraftyAIForgeMod.INSTANCE != null) {
+            Minecraft.getInstance().getSingleplayerServer().execute(() -> {
+                if (CraftyAIForgeMod.INSTANCE != null) CraftyAIForgeMod.INSTANCE.reloadConfig();
+            });
         }
-
-        cfg.api_key = key;
-        cfg.ai_name = aiNameField.getValue().trim().isEmpty() ? "Crafty" : aiNameField.getValue().trim();
-        if (providerUrlField != null) cfg.custom_provider_url = providerUrlField.getValue().trim();
-        if (providerKeyField != null) cfg.custom_provider_key = providerKeyField.getValue().trim();
-
-        try {
-            CraftyAIForgeModClient.saveConfig();
-            if (CraftyAIForgeMod.INSTANCE != null) {
-                CraftyAIForgeMod.INSTANCE.reloadConfig();
-            }
-            LOGGER.info("[CraftyAI] Saved config: agentic_tasks_enabled={}, force_local_mode={}, custom_provider_enabled={}, tier={}",
-                    cfg.agentic_tasks_enabled, cfg.force_local_mode, cfg.custom_provider_enabled, cfg.tier);
-            status = "\u00A7a\u2705 \u00A7lSaved successfully!";
-            statusColor = 0x55FF55;
-        } catch (Exception e) {
-            LOGGER.error("[CraftyAI] Save failed: {}", e.getMessage());
-            status = "\u00A7c\u274C Save failed: " + e.getMessage();
-            statusColor = 0xFF5555;
-        }
+        onClose();
     }
-
-    private void testGateway() {
-        String key = apiKeyField.getValue().trim();
-        if (key.isEmpty()) { status = "\u00A7c\u274C API key required for validation"; statusColor = 0xFF5555; return; }
-        if (!key.matches("^cai_[a-zA-Z0-9_-]{16,128}$")) {
-            lastKeyTestResult = "\u00A7c\u274C Bad format";
-            lastKeyTestColor = 0xFF5555;
-            status = "\u00A7c\u274C API key must start with cai_"; statusColor = 0xFF5555;
-            return;
-        }
-        status = "\u00A7e\u23F3 Validating key..."; statusColor = 0xFFAA00;
-        Thread testThread = new Thread(() -> {
-            HttpURLConnection conn = null;
-            try {
-                conn = (HttpURLConnection) URI.create(GatewayRequestHeaders.getGatewayUrl() + "/v1/handshake").toURL().openConnection();
-                conn.setRequestMethod("POST"); conn.setDoOutput(true);
-                conn.setConnectTimeout(5000); conn.setReadTimeout(5000);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Authorization", "Bearer " + key);
-                GatewayRequestHeaders.apply(conn, CLIENT_TYPE, sessionId());
-                String body = "{\"version\":\"" + GatewayRequestHeaders.MOD_VERSION + "\",\"client_type\":\"" + CLIENT_TYPE + "\",\"server_id\":\"" + sessionId() + "\"}";
-                conn.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
-                int code = conn.getResponseCode();
-                if (code >= 200 && code < 300) {
-                    String resBody = "";
-                    try (java.io.InputStream in = conn.getInputStream()) {
-                        resBody = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-                    }
-                    String tier = "unknown";
-                    boolean suspended = false;
-                    String warnMsg = null;
-                    try {
-                        com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(resBody).getAsJsonObject();
-                        if (json.has("tier")) tier = json.get("tier").getAsString();
-                        if (json.has("status") && "suspended".equalsIgnoreCase(json.get("status").getAsString())) suspended = true;
-                        if (json.has("warnings") && json.getAsJsonArray("warnings").size() > 0) {
-                            warnMsg = json.getAsJsonArray("warnings").get(0).getAsJsonObject().get("message").getAsString();
-                        }
-                    } catch (Exception ignored) {}
-                    CraftyAIForgeModClient.getConfig().tier = tier;
-                    if (suspended) {
-                        lastKeyTestResult = "\u00A7c\u274C Suspended";
-                        lastKeyTestColor = 0xFF5555;
-                        status = "\u00A7c\u274C \u00A7lAccount Suspended. \u00A7r\u00A77Open a ticket: \u00A7bdiscord.gg/zCkE44hsBR";
-                        statusColor = 0xFF5555;
-                    } else {
-                        lastKeyTestResult = "\u00A7a\u2705 Valid";
-                        lastKeyTestColor = 0x55FF55;
-                        String tierEmoji = isEnterpriseTier(CraftyAIForgeModClient.getConfig()) ? "\uD83D\uDC8E" : (isProTier(CraftyAIForgeModClient.getConfig()) ? "\uD83D\uDC8E" : "\u2728");
-                        String extra = warnMsg != null ? " \u00A77\u00A7o\u26A0 " + warnMsg : "";
-                        status = "\u00A7a\u2705 \u00A7lKey Valid! \u00A7r\u00A7aTier: \u00A7f" + tierEmoji + " " + tier + extra;
-                        statusColor = 0x55FF55;
-                    }
-                } else if (code == 401 || code == 403) {
-                    String errBody = "";
-                    try (java.io.InputStream in = conn.getErrorStream()) {
-                        if (in != null) errBody = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-                    } catch (Exception ignored) {}
-                    String errMsg = "Unauthorized";
-                    try {
-                        com.google.gson.JsonObject errJson = com.google.gson.JsonParser.parseString(errBody).getAsJsonObject();
-                        if (errJson.has("error")) errMsg = errJson.get("error").getAsString();
-                    } catch (Exception ignored) {}
-                    lastKeyTestResult = "\u00A7c\u274C Invalid";
-                    lastKeyTestColor = 0xFF5555;
-                    status = "\u00A7c\u274C \u00A7lKey Invalid! \u00A7r\u00A77" + errMsg;
-                    statusColor = 0xFF5555;
-                } else {
-                    lastKeyTestResult = "\u00A7e\u26A0 HTTP " + code;
-                    lastKeyTestColor = 0xFFAA00;
-                    status = "\u00A7e\u26A0 Gateway returned HTTP " + code;
-                    statusColor = 0xFFAA00;
-                }
-            } catch (IOException e) {
-                lastKeyTestResult = "\u00A7c\u274C Unreachable";
-                lastKeyTestColor = 0xFF5555;
-                status = "\u00A7c\u274C Gateway unreachable. Check your internet.";
-                statusColor = 0xFF5555;
-            }
-            finally { if (conn != null) conn.disconnect(); }
-        }, "CraftyAI-Test");
-        testThread.setDaemon(true);
-        testThread.start();
+    @Override public void onClose() {
+        if (closed) return;
+        closed = true;
+        Minecraft client = Minecraft.getInstance();
+        client.execute(() -> {
+            if (client.screen == this) client.setScreen(parent);
+        });
     }
-
-    private void testProvider() {
-        if (providerUrlField == null) return;
-        String url = providerUrlField.getValue().trim();
-        String key = providerKeyField != null ? providerKeyField.getValue().trim() : "";
-        if (url.isEmpty()) { status = "\u00A7c\u274C Provider URL required"; statusColor = 0xFF5555; return; }
-        status = "\u00A7e\u23F3 Testing provider..."; statusColor = 0xFFAA00;
-        Thread providerThread = new Thread(() -> {
-            HttpURLConnection conn = null;
-            try {
-                conn = (HttpURLConnection) URI.create(url + "/v1/models").toURL().openConnection();
-                conn.setRequestMethod("GET"); conn.setConnectTimeout(5000); conn.setReadTimeout(5000);
-                if (!key.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + key);
-                int code = conn.getResponseCode();
-                if (code >= 200 && code < 300) {
-                    status = "\u00A7a\u2705 \u00A7lProvider online!";
-                    statusColor = 0x55FF55;
-                } else {
-                    status = "\u00A7c\u274C Provider returned HTTP " + code;
-                    statusColor = 0xFF5555;
-                }
-            } catch (IOException e) {
-                status = "\u00A7c\u274C Provider unreachable";
-                statusColor = 0xFF5555;
-            }
-            finally { if (conn != null) conn.disconnect(); }
-        }, "CraftyAI-Provider-Test");
-        providerThread.setDaemon(true);
-        providerThread.start();
-    }
-
-    // --- Render ---
-
-    @Override
-    public void renderBackground(GuiGraphics g, int mx, int my, float d) {
-        super.renderBackground(g, mx, my, d);
-        CraftyAIConfig cfg = CraftyAIForgeModClient.getConfig();
-        int left = (this.width - W) / 2;
-        int y = Math.max(4, (this.height - contentH) / 2);
-        // Clean dark rounded-feel background container
-        g.fillGradient(left - PAD, y - 8, left + W + PAD, y + contentH + 8, 0xE0101828, 0xE0182438);
-        int accent = tierColor(cfg.tier);
-        g.fill(left - PAD, y - 8, left + W + PAD, y - 6, accent);
-    }
-
-    @Override
-    public void render(GuiGraphics g, int mx, int my, float d) {
-        super.render(g, mx, my, d);
-        CraftyAIConfig cfg = CraftyAIForgeModClient.getConfig();
-        int left = (this.width - W) / 2;
-        int y = Math.max(4, (this.height - contentH) / 2);
-
-        int accent = tierColor(cfg.tier);
-        String titleText = "\u00A7b\u2726 CraftyAI Settings \u00A78\u2014 \u00A7r" + cap(cfg.tier);
-        g.drawCenteredString(this.font, Component.literal(titleText), this.width / 2, y + 2, accent);
-        y += 16;
-
-        // API Key status badge
-        if (lastKeyTestResult != null) {
-            int badgeX = left + W - 56;
-            int badgeY = y + LBL + 2;
-            g.drawString(this.font, Component.literal(lastKeyTestResult), badgeX, badgeY, lastKeyTestColor);
-        }
-
-        // Labels
-        g.drawString(this.font, Component.literal("\uD83D\uDD11 \u00A7fAPI Key"), left, y, 0xFFFFFF);
-        y += LBL + FH + GAP;
-        g.drawString(this.font, Component.literal("\uD83E\uDD16 \u00A7fAI Name"), left, y, 0xFFFFFF);
-        y += LBL + FH + GAP;
-
-        y += FH + GAP; // Mode
-        y += FH + GAP; // Custom Provider
-
-        if (cfg.custom_provider_enabled) {
-            g.drawString(this.font, Component.literal("\uD83C\uDF10 \u00A7fProvider URL"), left, y, 0xFFFFFF);
-            y += LBL + FH + GAP;
-            g.drawString(this.font, Component.literal("\uD83D\uDDDD\uFE0F \u00A7fProvider Key"), left, y, 0xFFFFFF);
-            y += LBL + FH + GAP;
-        }
-
-        y += FH + GAP; // Agentic
-
-        // Session ID
-        g.drawString(this.font, Component.literal("\uD83D\uDD17 \u00A77Session: \u00A7f" + shortId(sessionId())), left, y + 6, 0xDDDDDD);
-
-        // Multiplayer hint
-        if (Minecraft.getInstance() != null && Minecraft.getInstance().getCurrentServer() != null) {
-            g.drawCenteredString(this.font,
-                    Component.literal("\u00A77\u26A0 Multiplayer: agentic tasks controlled by \u00A7fplugins/CraftyAI/config.yml"),
-                    this.width / 2, this.height - 50, 0xAAAAAA);
-        }
-
-        // Status (color-coded)
-        if (!status.isEmpty()) {
-            g.drawCenteredString(this.font, Component.literal(status), this.width / 2, this.height - 32, statusColor);
-        }
-
-        g.drawCenteredString(this.font, Component.literal("\u00A77Guides & Support: \u00A7bcraftyai.pages.dev"),
-                this.width / 2, this.height - 18, 0x55FFFF);
-    }
-
-    @Override
-    public void onClose() {
-        if (this.minecraft != null) {
-            CraftyAIForgeModClient.safeSetScreen(this.minecraft, this.parent);
-        }
-    }
+    @Override public void removed() { closed = true; super.removed(); }
+    @Override public boolean isPauseScreen() { return false; }
 }
